@@ -1,0 +1,41 @@
+{
+  "name": "Sage Control Center",
+  "short_name": "Sage",
+  "description": "AI-powered ecosystem - Brain monitoring and Architect development studio",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00ff88",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities", "developer tools"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Brain Monitor",
+      "short_name": "Brain",
+      "description": "View live brain status and transcripts",
+      "url": "/brain",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Architect Studio",
+      "short_name": "Architect",
+      "description": "Code planning and project management",
+      "url": "/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

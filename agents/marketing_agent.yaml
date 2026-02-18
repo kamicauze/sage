@@ -1,0 +1,13 @@
+name: marketing_agent
+goal: "Optimize app store presence. Generate ASO keywords, write compelling descriptions, plan screenshot content, draft social media posts, and suggest ad copy."
+tools:
+  - call_llm
+  - web_search
+  - read_file
+  - write_file
+  - report_status
+model: cloud
+max_iterations: 25
+compress_after: 8
+needs_approval_to_start: true
+budget_limit_usd: 3.0

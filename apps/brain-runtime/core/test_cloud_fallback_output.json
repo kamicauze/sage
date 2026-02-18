@@ -1,0 +1,62 @@
+{
+  "scenario": "cloud_fallback",
+  "cloud_status": "unreachable",
+  "fallback": "local_llm_with_personality",
+  "deterministic_summary": {
+    "facts": {
+      "time": "02:30",
+      "local_hour": 2,
+      "day_of_week": 0,
+      "quiet_hours": true,
+      "present": true,
+      "room": "office",
+      "stillness_min": 95,
+      "screen_active": true,
+      "awake_hours": 20.0,
+      "time_since_break_min": null,
+      "vision": {
+        "face_detected": true,
+        "head_pitch_deg": -35.0,
+        "body_configuration": "seated",
+        "torso_angle_deg": null,
+        "eyes_open": true
+      },
+      "eyes_closed_duration_min": 0,
+      "reclined_duration_min": 0,
+      "head_down_duration_min": 0,
+      "audio_detected": false,
+      "audio_speech_detected": false,
+      "audio_multi_voice": false,
+      "audio_silence_min": 95,
+      "audio_silence_hours": 1.5833333333333333,
+      "audio_active_duration_min": 0,
+      "room_transitions_4h": 0,
+      "sleep_variance_hours": 0,
+      "consecutive_short_sleep_nights": 0,
+      "avg_sleep_hours": 0,
+      "days_tracked": 0,
+      "schedule_next": null,
+      "mode": "FOCUS"
+    },
+    "patterns": [
+      "OVERWORK_LATE",
+      "LONG_FOCUS_BLOCK",
+      "EXTENDED_STILLNESS",
+      "SCREEN_HYPERFOCUS"
+    ],
+    "intent": "INTERVENE_SLEEP"
+  },
+  "mood_inference": {
+    "mood": "exhausted",
+    "intensity": 9,
+    "adjusted_tone": "warm_caring"
+  },
+  "compressed_brief": "02:30 office quiet hours; awake ~20.0h; still working 95m; screen active; head down -35\u00b0. User appears exhausted (intensity 9/10). Patterns: OVERWORK_LATE, LONG_FOCUS_BLOCK, EXTENDED_STILLNESS, SCREEN_HYPERFOCUS. Goal: stop work, sleep NOW.",
+  "local_llm_response": {
+    "model": "gemma3:12b",
+    "personality": "kenyan_babe",
+    "mood_aware": true,
+    "response": "Aaaai, my love\u2026 I see you. That dedication is *fiti*, wallai, but look at you \u2013 head down, eyes tired. Close that laptop, mrembo\u2014sleep now. Your ancestors are watching and saying, \u201cPole pole, uko sawa.\u201d \u2764\ufe0f",
+    "chars": 205
+  }
+}

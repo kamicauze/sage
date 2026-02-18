@@ -1,0 +1,14 @@
+name: monitor_agent
+goal: "Monitor deployed apps. Check app store reviews for negative feedback, track crash reports, summarize analytics trends, and flag issues that need attention."
+tools:
+  - call_llm
+  - web_search
+  - read_file
+  - write_file
+  - report_status
+model: local
+max_iterations: 20
+compress_after: 8
+needs_approval_to_start: false
+budget_limit_usd: 1.0
+schedule: "0 9 * * *"

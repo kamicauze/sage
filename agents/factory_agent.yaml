@@ -1,0 +1,19 @@
+name: factory_agent
+goal: "Orchestrate the full app factory pipeline: research → spec → build → test → deploy. Spawns sub-agents for each phase and tracks overall progress."
+tools:
+  - call_llm
+  - web_search
+  - read_file
+  - write_file
+  - architect_plan
+  - architect_build
+  - run_tests
+  - deploy
+  - write_agent_config
+  - register_agent
+  - report_status
+model: cloud
+max_iterations: 50
+compress_after: 6
+needs_approval_to_start: true
+budget_limit_usd: 10.0

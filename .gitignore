@@ -1,0 +1,80 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local virtualenvs
+.venv/
+.venv-vision/
+
+# Node build output
+architect/ui/node_modules/
+architect/ui/.next/
+apps/architect-studio/ui/node_modules/
+apps/architect-studio/ui/.next/
+
+# Runtime/generated local state
+.sage_memory/
+.sage_memory_bench/
+architect/workspaces/*/sandbox/
+apps/architect-studio/workspaces/*/sandbox/
+generated/
+tmptqt82c5m/
+tmpwfxhjagl/
+
+# Large model/data artifacts
+artifacts/
+yolov8n.pt
+apps/brain-runtime/voice/models/
+
+# Legacy compatibility paths (symlinked into artifacts/)
+brain/voice/training_data/
+brain/voice/training/checkpoints/
+brain/voice/training/models/
+brain/voice/training/eval_output/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+*.log
+logs/
+apps/brain-runtime/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+
+# Temp files
+tmp*/
+*.tmp
+*.bak
+
+# Node modules (all)
+node_modules/
+
+# Nested git repos (submodules)
+apps/brain-runtime/voice/training/qwen3-tts/
+
+# Mobile app build artifacts
+apps/sage-mobile/android/
+apps/sage-mobile/ios/
+apps/sage-mobile/.expo/
+
+# Large model/audio files (keep small config files)
+*.onnx
+*.safetensors
+brain/voice/qwen_reference.wav
+
+# Flight review dummy data
+flight_review_dummy/
+
+# Test output
+test_cloud_fallback_output.json
+*.log

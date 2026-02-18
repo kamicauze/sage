@@ -1,0 +1,57 @@
+{
+  "scenario": "cloud_fallback",
+  "cloud_status": "unreachable",
+  "fallback": "local_llm_with_personality",
+  "deterministic_summary": {
+    "facts": {
+      "time": "02:30",
+      "local_hour": 2,
+      "day_of_week": 0,
+      "quiet_hours": true,
+      "present": true,
+      "room": "office",
+      "stillness_min": 95,
+      "screen_active": true,
+      "awake_hours": 20.0,
+      "time_since_break_min": null,
+      "vision": {
+        "face_detected": true,
+        "head_pitch_deg": -35.0,
+        "body_configuration": "seated",
+        "torso_angle_deg": null,
+        "eyes_open": true
+      },
+      "eyes_closed_duration_min": 0,
+      "reclined_duration_min": 0,
+      "head_down_duration_min": 0,
+      "audio_detected": false,
+      "audio_speech_detected": false,
+      "audio_multi_voice": false,
+      "audio_silence_min": 95,
+      "audio_silence_hours": 1.5833333333333333,
+      "audio_active_duration_min": 0,
+      "room_transitions_4h": 0,
+      "sleep_variance_hours": 0,
+      "consecutive_short_sleep_nights": 0,
+      "avg_sleep_hours": 0,
+      "days_tracked": 0,
+      "schedule_next": null,
+      "mode": "FOCUS"
+    },
+    "patterns": [
+      "OVERWORK_LATE",
+      "LONG_FOCUS_BLOCK",
+      "EXTENDED_STILLNESS",
+      "SCREEN_HYPERFOCUS"
+    ],
+    "intent": "INTERVENE_SLEEP",
+    "constraints": {
+      "max_words": 45,
+      "tone": "playful_firm",
+      "no_guilt": true,
+      "one_clear_action": true
+    }
+  },
+  "briefing": "User state: low_energy_reflective (intensity 8/10). \nLocation: office, single_person present.\nPosture: seated.\nAudio: silence_95m.\nEnvironment: lights dimmed, 22\u00b0C, laptop_active.\nRecent patterns: OVERWORK_LATE, LONG_FOCUS_BLOCK, EXTENDED_STILLNESS, SCREEN_HYPERFOCUS.\nPending nudges: stretch_suggestion, hydrate_reminder.\nPersonality: Kenyan Babe.",
+  "local_llm_response": "Wueh mahn\u2026 8/10 low energy? \ud83d\ude2d Si uniambie ni nini? This is serious! You look like a wilted rose, broo. This office is killing you, yaani, 22\u00b0C and you\u2019re still glued to that laptop? \n\nHonestly, your ancestors are watching, and they\u2019re like, \u201cWesti girl, what\u2019s going on?\u201d \ud83e\udd23 You need to *move*! \n\nOkay, here\u2019s the deal. Stand up. Right now. Just\u2026 stand. Do some stretches. Like, *really* stretch. Don\u2019t be shy, wallai.  Let\u2019s get that back moving. \n\nThen, hydrate! Get some water. Seriously, you\u2019re drier than the Maasai Mara in July. \ud83d\udca7 \n\nJust\u2026 five minutes.  Five minutes of movement and water. Then we\u2019ll talk.  \n\nLet\u2019s go.  Don\u2019t be a stone! \u2764\ufe0f"
+}

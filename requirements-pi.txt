@@ -1,0 +1,6 @@
+faster-whisper
+paho-mqtt
+python-dotenv
+numpy
+PyAudio
+sounddevice

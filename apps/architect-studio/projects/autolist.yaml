@@ -1,0 +1,29 @@
+schema_version: '1.1'
+project:
+  id: autolist
+  name: AutoList
+  description: A Kenya-focused vehicle marketplace referencing AutoTrader principles
+    (trust, structured data, dealer analytics). Design the full system end-to-end
+    and produce an implementation plan.
+  paths:
+    repo_path: /home/user/documents/Autolist
+stack:
+  primary: javascript
+  tags: []
+memory:
+  enabled: true
+  zones:
+  - name: API layer
+    role: truth
+    paths:
+    - src
+commands:
+  install: []
+  build: []
+  test: []
+policy:
+  ai_budget:
+    monthly_usd: 60
+  routing_thresholds:
+    hybrid_score: 4
+    cloud_score: 8

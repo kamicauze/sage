@@ -1,0 +1,224 @@
+{
+  "last_updated": "2026-01-13T00:00:00.000000",
+  "models": {
+    "ollama/gemma3:12b": {
+      "name": "gemma3:12b",
+      "provider": "ollama",
+      "input_cost": 0.0,
+      "output_cost": 0.0,
+      "context_window": 8192,
+      "capabilities": ["code", "chat", "planning"],
+      "speed": "fast",
+      "quality": "medium"
+    },
+    "ollama/deepseek-r1": {
+      "name": "deepseek-r1",
+      "provider": "ollama",
+      "input_cost": 0.0,
+      "output_cost": 0.0,
+      "context_window": 32768,
+      "capabilities": ["code", "reasoning", "math"],
+      "speed": "medium",
+      "quality": "very-high"
+    },
+    "openai/gpt-5": {
+      "name": "gpt-5",
+      "provider": "openai",
+      "input_cost": 1.25,
+      "output_cost": 10.0,
+      "context_window": 128000,
+      "capabilities": ["code", "reasoning", "chat", "agentic"],
+      "speed": "medium",
+      "quality": "very-high"
+    },
+    "openai/gpt-5-mini": {
+      "name": "gpt-5-mini",
+      "provider": "openai",
+      "input_cost": 0.25,
+      "output_cost": 2.0,
+      "context_window": 128000,
+      "capabilities": ["chat", "code", "reasoning"],
+      "speed": "fast",
+      "quality": "high"
+    },
+    "openai/gpt-5-nano": {
+      "name": "gpt-5-nano",
+      "provider": "openai",
+      "input_cost": 0.05,
+      "output_cost": 0.4,
+      "context_window": 128000,
+      "capabilities": ["chat", "code"],
+      "speed": "very-fast",
+      "quality": "medium"
+    },
+    "openai/gpt-4o": {
+      "name": "gpt-4o",
+      "provider": "openai",
+      "input_cost": 2.5,
+      "output_cost": 10.0,
+      "context_window": 128000,
+      "capabilities": ["code", "reasoning", "chat"],
+      "speed": "medium",
+      "quality": "high"
+    },
+    "openai/gpt-4o-mini": {
+      "name": "gpt-4o-mini",
+      "provider": "openai",
+      "input_cost": 0.15,
+      "output_cost": 0.6,
+      "context_window": 128000,
+      "capabilities": ["chat", "code"],
+      "speed": "fast",
+      "quality": "medium"
+    },
+    "anthropic/claude-opus-4.5": {
+      "name": "claude-opus-4.5",
+      "provider": "anthropic",
+      "input_cost": 5.0,
+      "output_cost": 25.0,
+      "context_window": 200000,
+      "capabilities": ["code", "reasoning", "chat", "analysis"],
+      "speed": "medium",
+      "quality": "very-high"
+    },
+    "anthropic/claude-sonnet-4.5": {
+      "name": "claude-sonnet-4.5",
+      "provider": "anthropic",
+      "input_cost": 3.0,
+      "output_cost": 15.0,
+      "context_window": 200000,
+      "capabilities": ["code", "reasoning", "chat"],
+      "speed": "fast",
+      "quality": "high"
+    },
+    "anthropic/claude-haiku-4.5": {
+      "name": "claude-haiku-4.5",
+      "provider": "anthropic",
+      "input_cost": 1.0,
+      "output_cost": 5.0,
+      "context_window": 200000,
+      "capabilities": ["code", "chat"],
+      "speed": "very-fast",
+      "quality": "medium"
+    },
+    "google/gemini-3-pro": {
+      "name": "gemini-3-pro-preview",
+      "provider": "google",
+      "input_cost": 2.0,
+      "output_cost": 12.0,
+      "context_window": 2000000,
+      "capabilities": ["reasoning", "planning", "code", "multimodal", "agentic"],
+      "speed": "medium",
+      "quality": "very-high"
+    },
+    "google/gemini-3-flash": {
+      "name": "gemini-3-flash-preview",
+      "provider": "google",
+      "input_cost": 0.5,
+      "output_cost": 3.0,
+      "context_window": 1000000,
+      "capabilities": ["reasoning", "code", "chat", "fast"],
+      "speed": "very-fast",
+      "quality": "high"
+    },
+    "google/gemini-2.5-pro": {
+      "name": "gemini-2.5-pro",
+      "provider": "google",
+      "input_cost": 2.5,
+      "output_cost": 10.0,
+      "context_window": 1000000,
+      "capabilities": ["reasoning", "planning", "code", "multimodal"],
+      "speed": "medium",
+      "quality": "very-high"
+    },
+    "google/gemini-1.5-pro": {
+      "name": "gemini-1.5-pro",
+      "provider": "google",
+      "input_cost": 1.25,
+      "output_cost": 5.0,
+      "context_window": 1000000,
+      "capabilities": ["reasoning", "planning", "code"],
+      "speed": "medium",
+      "quality": "high"
+    },
+    "google/gemini-2.0-flash": {
+      "name": "gemini-2.0-flash",
+      "provider": "google",
+      "input_cost": 0.08,
+      "output_cost": 0.3,
+      "context_window": 1000000,
+      "capabilities": ["chat", "code", "fast"],
+      "speed": "very-fast",
+      "quality": "medium"
+    },
+    "google/gemini-1.5-flash": {
+      "name": "gemini-1.5-flash",
+      "provider": "google",
+      "input_cost": 0.075,
+      "output_cost": 0.3,
+      "context_window": 1000000,
+      "capabilities": ["chat", "code"],
+      "speed": "fast",
+      "quality": "medium"
+    },
+    "xai/grok-4.1": {
+      "name": "grok-4.1",
+      "provider": "xai",
+      "input_cost": 0.2,
+      "output_cost": 0.5,
+      "context_window": 2000000,
+      "capabilities": ["reasoning", "code", "chat", "search"],
+      "speed": "fast",
+      "quality": "very-high"
+    },
+    "xai/grok-3-beta": {
+      "name": "grok-3-beta",
+      "provider": "xai",
+      "input_cost": 3.0,
+      "output_cost": 15.0,
+      "context_window": 128000,
+      "capabilities": ["reasoning", "code", "chat"],
+      "speed": "medium",
+      "quality": "high"
+    },
+    "xai/grok-2-1212": {
+      "name": "grok-2-1212",
+      "provider": "xai",
+      "input_cost": 2.0,
+      "output_cost": 10.0,
+      "context_window": 128000,
+      "capabilities": ["chat", "code", "vision"],
+      "speed": "fast",
+      "quality": "high"
+    },
+    "deepseek/deepseek-r1": {
+      "name": "deepseek-r1",
+      "provider": "deepseek",
+      "input_cost": 0.55,
+      "output_cost": 2.19,
+      "context_window": 64000,
+      "capabilities": ["reasoning", "code", "math", "logic"],
+      "speed": "fast",
+      "quality": "very-high"
+    }
+  },
+  "routing_recommendations": {
+    "planning": {
+      "simple": "ollama/gemma3:12b",
+      "complex": "google/gemini-3-flash"
+    },
+    "code": {
+      "simple": "ollama/gemma3:12b",
+      "medium": "anthropic/claude-sonnet-4.5",
+      "complex": "anthropic/claude-opus-4.5"
+    },
+    "reasoning": {
+      "simple": "ollama/deepseek-r1",
+      "complex": "deepseek/deepseek-r1"
+    },
+    "chat": "anthropic/claude-haiku-4.5",
+    "testing": "ollama/gemma3:12b"
+  },
+  "budget_estimate": 58.0,
+  "reasoning": "Balanced 2026 configuration with Gemini 3: Quality-first with cost awareness. Use FREE Ollama for 60% of tasks (simple planning, testing, local reasoning). Use latest Gemini 3 Flash ($0.50/$3) for complex planning - fast frontier intelligence with 1M context, 60% cheaper than 1.5 Pro. Use Claude Sonnet 4.5 ($3/$15) for medium code - industry-leading code quality. Use Claude Opus 4.5 ($5/$25) for complex code - best reasoning and architecture. Use Claude Haiku ($1/$5) for fast chat. Use DeepSeek R1 API ($0.55/$2.19) for reasoning tasks - excellent math/logic. Prioritizes reliability and proven performance. Estimated: ~$6/mo planning + ~$40/mo code + ~$7/mo chat/reasoning = $53/month, safely under $120 budget with 56% buffer for growth."
+}

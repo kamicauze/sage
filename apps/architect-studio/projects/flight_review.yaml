@@ -1,0 +1,26 @@
+schema_version: "1.1"
+
+project:
+  id: "flight_review"
+  name: "Flight Review XR"
+  description: "Flight replay and briefing tool."
+  paths:
+    repo_path: "flight_review_dummy"  # We will mock this folder
+
+stack:
+  primary: "unity"
+  tags: ["xr", "simulation"]
+
+memory:
+  enabled: true
+  zones:
+    - name: "Physics Engine"
+      role: "truth"
+      paths: ["flight_review_dummy/backend/physics"]
+    
+    - name: "User Interface"
+      role: "soul"
+      paths: ["flight_review_dummy/frontend/ui"]
+
+commands:
+  build: ["echo 'Building Unity Project...'"]

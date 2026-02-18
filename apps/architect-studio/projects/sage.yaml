@@ -1,0 +1,45 @@
+schema_version: "1.1"
+
+project:
+  id: "sage_brain"
+  name: "Sage Brain"
+  description: "The Runtime Core (Subconscious)"
+  paths:
+    repo_path: "."  # Root of the repo
+
+stack:
+  primary: "python"
+  tags: ["iot", "llm", "deterministic"]
+
+memory:
+  enabled: true
+  zones:
+    - name: "The Truth"
+      role: "truth"
+      paths: ["brain/core"]
+    
+    - name: "The Soul"
+      role: "soul"
+      paths: ["brain/ai"]
+    
+    - name: "The Hands"
+      role: "hands"
+      paths: ["brain/action", "brain/mqtt"]
+    
+    - name: "The Body"
+      role: "body"
+      paths: ["brain/infra"]
+
+commands:
+  install: ["pip install -r brain/requirements.txt"]
+
+policy:
+  ai_budget:
+    monthly_usd: 120.0
+    provider_rates:
+      "openai/gpt-4o": {input: 2.50, output: 10.00} # per 1M tokens
+      "ollama/gemma3:12b": {input: 0.0, output: 0.0}
+    models:
+      architect: "ollama/gemma3:12b" # Use local by default for building
+      brain: "openai/gpt-4o"         # Use cloud for high-level reasoning
+

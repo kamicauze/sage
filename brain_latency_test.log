@@ -1,0 +1,33 @@
+nohup: ignoring input
+[Lock] Acquired single-instance lock on port 60001
+/home/kamicauze/sage/brain/main.py:443: DeprecationWarning: There is no current event loop
+  loop = asyncio.get_event_loop()
+
+========================================
+✈️  SAGE PRE-FLIGHT CHECKLIST
+========================================
+Checking Ollama at http://localhost:11434... Checking MQTT Broker at localhost:1883... ✅ CONNECTED
+Checking Cloud APIs... Grok: ✅, OpenAI: ⚠️ (Missing/Default Key)
+✅ ONLINE
+========================================
+🟢 ALL SYSTEMS GO. CLEARED FOR TAKEOFF.
+
+🧠 Sage Nervous System starting...
+[MQTT] Subscribed to: sage/sensors/+/presence, sage/voice/transcript, sage/brain/config
+[Brain] System Ready. Pulse normal.
+[MQTT] Voice transcript received: 'What is the capital of Kenya?...'
+[Voice] Received: 'What is the capital of Kenya?'
+[Intent] Rule-based: type=brain_query, confidence=0.85
+[Voice] Intent: type=brain_query, project=None
+[Voice] Signals: {'explicit_cloud': False, 'explicit_local': False, 'urgent': False}
+[Voice] Brain query: 'what is the capital of kenya?'
+[NervousSystem] Handling significant event: user_intent
+[SummaryEngine] 21:03 none; awake ~0h.
+[AI] Calling Ollama model=gemma3:12b, reason=user_intent, fast=True, self_aware=True
+[AI] Ollama response received in 5431ms
+[AI] Parsed response type: suggestion
+[Router] Processing AI output: type=suggestion, local_hour=21, critical=False
+[Router] Suggestion received: text="Nairobi, babes! 🇰🇪 It's a vibrant city, full of energy. You learning about your roots? That's divine. ✨", confidence=0.95
+[Router] (gemma3:12b) suggestion: Nairobi, babes! 🇰🇪 It's a vibrant city, full of energy. You learning about your roots? That's divine. ✨ (conf=0.95)
+[Voice] Response published in 7792ms: Nairobi, babes! 🇰🇪 It's a vibrant city, full of energy. You learning about your roots? That's divine...
+🧠 Starting Sage Brain...

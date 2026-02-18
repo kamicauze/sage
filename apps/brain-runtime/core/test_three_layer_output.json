@@ -1,0 +1,114 @@
+{
+  "scenario": "late_night_deep_focus",
+  "timestamp": "2024-01-15T02:30:00",
+  "layer_1_deterministic": {
+    "facts": {
+      "time": "02:30",
+      "local_hour": 2,
+      "day_of_week": 0,
+      "quiet_hours": true,
+      "present": true,
+      "room": "office",
+      "stillness_min": 95,
+      "screen_active": true,
+      "awake_hours": 20.0,
+      "time_since_break_min": null,
+      "vision": {
+        "face_detected": true,
+        "head_pitch_deg": -35.0,
+        "body_configuration": "seated",
+        "torso_angle_deg": 10.0,
+        "eyes_open": true
+      },
+      "eyes_closed_duration_min": 0,
+      "reclined_duration_min": 0,
+      "head_down_duration_min": 55,
+      "audio_detected": false,
+      "audio_speech_detected": false,
+      "audio_multi_voice": false,
+      "audio_silence_min": 95,
+      "audio_silence_hours": 1.5833333333333333,
+      "audio_active_duration_min": 0,
+      "room_transitions_4h": 0,
+      "sleep_variance_hours": 0,
+      "consecutive_short_sleep_nights": 0,
+      "avg_sleep_hours": 0,
+      "days_tracked": 0,
+      "schedule_next": null,
+      "mode": "FOCUS"
+    },
+    "patterns": [
+      "OVERWORK_LATE",
+      "LONG_FOCUS_BLOCK",
+      "EXTENDED_STILLNESS",
+      "HEAD_DOWN_SUSTAINED",
+      "SCREEN_HYPERFOCUS"
+    ],
+    "intent": "INTERVENE_SLEEP",
+    "constraints": {
+      "max_words": 45,
+      "tone": "playful_firm",
+      "no_guilt": true,
+      "one_clear_action": true
+    },
+    "briefing": "02:30 office; quiet hours; awake ~20.0h; still 95m; screen active; head pitch -35.0\u00b0; seated; eyes open; Patterns: OVERWORK_LATE, LONG_FOCUS_BLOCK, EXTENDED_STILLNESS, HEAD_DOWN_SUSTAINED, SCREEN_HYPERFOCUS."
+  },
+  "layer_2_local_llm": {
+    "inferences": [
+      {
+        "label": "local_llm_suggestion",
+        "confidence": 0.8,
+        "evidence": [
+          "patterns=OVERWORK_LATE,LONG_FOCUS_BLOCK,EXTENDED_STILLNESS,HEAD_DOWN_SUSTAINED,SCREEN_HYPERFOCUS",
+          "awake_hours=20.0",
+          "quiet_hours=True"
+        ],
+        "llm_report": {
+          "location": "office",
+          "presence": "single_person",
+          "activity_level": "high",
+          "posture_signals": [
+            "slouched",
+            "head_pitch_deg: -35.0"
+          ],
+          "audio_signals": [],
+          "environmental_signals": {
+            "lights": "bright",
+            "temperature": "cool",
+            "device_usage": "screen"
+          },
+          "mood_inference": "frustrated",
+          "intensity": 8,
+          "recent_patterns": [
+            "OVERWORK_LATE",
+            "LONG_FOCUS_BLOCK",
+            "EXTENDED_STILLNESS",
+            "SCREEN_HYPERFOCUS"
+          ],
+          "pending_nudges": [
+            "stretch",
+            "look away"
+          ]
+        },
+        "mood": {
+          "inference": "frustrated",
+          "intensity": 8
+        }
+      }
+    ],
+    "compressed_brief": "02:30 office quiet hours; awake ~20.0h; still working 95m; no break; screen active; head down; deep focus. User appears frustrated (intensity 8/10). Next: flight school in 5.5h. Goal: stop work, start sleep routine NOW.",
+    "ask_cloud": "User is FRUSTRATED (intensity 8/10) - be EXTRA gentle, empathetic, and understanding. Write 2-3 sentences in gentle_empathetic Kenyan babe tone: 1) Acknowledge the impressive dedication/focus 2) ONE immediate action (close laptop, go to bed) 3) Mention early flight school commitment Constraints: max 45 words, no guilt, be frustrated-aware"
+  },
+  "layer_3_cloud": {
+    "response": "Wueh mahn, your dedication ni impressive, grinding deep like a true hustler even with all that frustration weighing in \u2764\ufe0f. Sasa, close that laptop and slide into bed kidogo. Flight school iko in 5.5 hours\u2014you got this, rest up.",
+    "metadata": {
+      "model": "grok-beta",
+      "chars": 227,
+      "tone": "playful_firm",
+      "constraints_met": {
+        "responded": true,
+        "personality": "kenyan_babe"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+name: self_heal_agent
+goal: "Monitor Sage's own health. Check MQTT broker, verify services are responding, measure latency, restart stalled components, and report anomalies."
+tools:
+  - call_llm
+  - read_file
+  - run_tests
+  - report_status
+model: local
+max_iterations: 15
+compress_after: 8
+needs_approval_to_start: false
+budget_limit_usd: 0.5
+schedule: "*/30 * * * *"

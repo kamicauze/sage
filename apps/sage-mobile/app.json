@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "Sage Mobile",
+    "slug": "sage-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      }
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}

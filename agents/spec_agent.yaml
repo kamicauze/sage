@@ -1,0 +1,12 @@
+name: spec_agent
+goal: "Generate a full product spec from a research report. Output includes user stories, feature list, tech stack recommendation, and architecture overview."
+tools:
+  - call_llm
+  - read_file
+  - write_file
+  - report_status
+model: cloud
+max_iterations: 20
+compress_after: 8
+needs_approval_to_start: true
+budget_limit_usd: 2.0

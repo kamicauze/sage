@@ -1,0 +1,13 @@
+name: research_agent
+goal: "Research a market niche or app category. Find top-performing apps, identify gaps, analyze reviews, and produce a competitive analysis report."
+tools:
+  - call_llm
+  - web_search
+  - read_file
+  - write_file
+  - report_status
+model: cloud
+max_iterations: 30
+compress_after: 8
+needs_approval_to_start: true
+budget_limit_usd: 3.0

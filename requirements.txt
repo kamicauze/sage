@@ -1,0 +1,49 @@
+# The Symbiote Dependencies
+
+# Core (The Brain)
+paho-mqtt==1.6.1
+requests
+python-dotenv
+aiohttp
+asyncio
+
+# Architect (The Builder)
+chromadb
+langchain
+langchain-community
+langchain-text-splitters
+sentence-transformers
+pytest
+
+# MCP Clients (Model Context Protocol)
+aiofiles>=23.2.1
+watchdog>=3.0.0
+aiomqtt>=2.0.0
+
+# Voice
+SpeechRecognition
+pyaudio
+faster-whisper
+numpy
+
+# Speaker (TTS)
+# f5-tts (install via: pip install git+https://github.com/SWivid/F5-TTS.git)
+sounddevice
+soundfile
+librosa
+tomli
+numpy
+torch
+torchaudio
+einops
+vector_quantize_pytorch
+vocos
+tqdm
+gradio
+kokoro-onnx
+
+# Qwen3-TTS (Sheng voice)
+qwen-tts
+
+# Training / Fine-tuning (optional - only needed on training machine)
+# pip install peft datasets evaluate jiwer accelerate bitsandbytes ctranslate2

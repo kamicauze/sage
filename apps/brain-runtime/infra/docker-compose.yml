@@ -1,0 +1,28 @@
+services:
+  brain:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -lc "pip install -r requirements.txt && python main.py"
+    ports: ["8000:8000"]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://sage:sage@postgres:5432/sage_dev
+      REDIS_URL: redis://redis:6379
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_MODEL_FAST: gemma3:latest
+      OLLAMA_MODEL_MID: llama3.1:8b
+      OLLAMA_MODEL_DEEP: gemma3:12b
+    networks:
+      - sage_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  sage_net:
+    external: true
+    name: sage_net
