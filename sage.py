@@ -11,6 +11,7 @@ import json
 import subprocess
 import signal
 import time
+import shlex
 from datetime import datetime
 
 # Ensure we can import from local modules
@@ -312,6 +313,26 @@ def cmd_brain(args):
 def cmd_dashboard(args):
     print("📊 Starting Sage Dashboard...")
     subprocess.run([sys.executable, "brain/dashboard.py"])
+
+def cmd_macmini(args):
+    """Start Mac mini all-in-one core profile (MLX + PWA core, no STT/TTS)."""
+    script_path = os.path.join(os.getcwd(), "apps/brain-runtime/deploy/start_macmini_all.sh")
+    if not os.path.exists(script_path):
+        print(f"❌ Missing launcher: {script_path}")
+        return
+
+    env = os.environ.copy()
+    if getattr(args, "env_file", None):
+        env["SAGE_ENV_FILE"] = args.env_file
+
+    cmd = ["bash", script_path]
+    if getattr(args, "env_file", None):
+        cmd.append(args.env_file)
+
+    try:
+        subprocess.run(cmd, env=env)
+    except KeyboardInterrupt:
+        pass
 
 def cmd_api(args):
     """Start Architect FastAPI backend."""
@@ -873,6 +894,147 @@ def cmd_stop(args):
 
     print("✅ Sage stopped.")
 
+def _ssh_run(host, remote_cmd, capture=False):
+    """Run a remote command over ssh."""
+    cmd = ["ssh", host, remote_cmd]
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.STDOUT if capture else None,
+        text=True,
+    )
+    if result.returncode != 0:
+        out = (result.stdout or "").strip()
+        if out:
+            print(out)
+        raise RuntimeError(f"SSH command failed on host '{host}'")
+    if capture:
+        return (result.stdout or "").strip()
+    return ""
+
+def _is_running(pattern):
+    return subprocess.call(
+        ["pgrep", "-f", pattern],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ) == 0
+
+def _expand_remote_home(path):
+    if path == "~":
+        return "$HOME"
+    if path.startswith("~/"):
+        return "$HOME/" + path[2:]
+    return path
+
+def _start_remote_mobile(host, remote_root, expo_port, remote_log):
+    remote_root_expanded = _expand_remote_home(remote_root.rstrip("/"))
+    remote_mobile_dir = f"{remote_root_expanded}/apps/sage-mobile"
+    remote_mobile_dir_escaped = remote_mobile_dir.replace('"', '\\"')
+    remote_cmd = f"""
+set -e
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh"
+fi
+cd "{remote_mobile_dir_escaped}"
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js missing on remote host PATH. Load nvm in shell profile first."
+  exit 1
+fi
+if [ ! -d node_modules ]; then
+  npm install
+fi
+pkill -f "expo start --ios" >/dev/null 2>&1 || true
+nohup npx expo start --ios --port {int(expo_port)} > {shlex.quote(remote_log)} 2>&1 &
+echo "$!"
+"""
+    pid = _ssh_run(host, remote_cmd, capture=True).splitlines()[-1].strip()
+    print(f"📱 Mobile interface started on {host} (expo pid={pid}, port={expo_port})")
+    print(f"   Logs: {remote_log}")
+
+def _stop_remote_mobile(host):
+    remote_cmd = """
+pkill -f "expo start --ios" >/dev/null 2>&1 || true
+pkill -f "npm exec expo start" >/dev/null 2>&1 || true
+echo "stopped"
+"""
+    _ssh_run(host, remote_cmd, capture=True)
+    print(f"📱 Mobile interface stopped on {host}")
+
+def cmd_cluster(args):
+    """One-command cluster controls (mini + remote mobile)."""
+    host = args.host
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    action = args.action
+
+    if action == "up":
+        if not args.no_mini:
+            if _is_running("sage.py macmini"):
+                print("🧠 Mac mini core already running")
+            else:
+                start_cmd = (
+                    f"cd {shlex.quote(root_dir)} && "
+                    "nohup ./sage macmini > /tmp/sage_macmini.log 2>&1 & echo $!"
+                )
+                mini_pid = subprocess.check_output(["bash", "-lc", start_cmd], text=True).strip()
+                print(f"🧠 Mac mini core started (pid={mini_pid})")
+                print("   Logs: /tmp/sage_macmini.log")
+
+        if not args.no_mobile:
+            _start_remote_mobile(host, args.remote_root, args.expo_port, args.remote_log)
+        return
+
+    if action == "mobile-up":
+        _start_remote_mobile(host, args.remote_root, args.expo_port, args.remote_log)
+        return
+
+    if action == "down":
+        if not args.no_mini:
+            cmd_stop(args)
+        if not args.no_mobile:
+            _stop_remote_mobile(host)
+        return
+
+    if action == "mobile-down":
+        _stop_remote_mobile(host)
+        return
+
+    if action == "status":
+        print("🧠 Mac mini")
+        print(f"   core: {'up' if _is_running('sage.py macmini') else 'down'}")
+        print(f"   brain: {'up' if _is_running('brain/main.py') else 'down'}")
+        print(f"   mlx: {'up' if _is_running('mlx_lm.server') else 'down'}")
+        print(f"   ui(next): {'up' if _is_running('next') else 'down'}")
+
+        remote_cmd = f"""
+set +e
+if pgrep -f "expo start --ios" >/dev/null 2>&1; then
+  echo "mobile=up"
+elif lsof -iTCP:{int(args.expo_port)} -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "mobile=up"
+else
+  echo "mobile=down"
+fi
+if lsof -iTCP:{int(args.expo_port)} -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "port=listen"
+else
+  echo "port=down"
+fi
+if xcrun simctl list devices | grep -E "iPhone 16 Pro .*\\(Booted\\)" >/dev/null 2>&1; then
+  echo "simulator=booted"
+else
+  echo "simulator=not_booted"
+fi
+"""
+        output = _ssh_run(host, remote_cmd, capture=True)
+        print(f"📱 MacBook ({host})")
+        for line in output.splitlines():
+            print(f"   {line}")
+        print(f"   logs={args.remote_log}")
+        return
+
+    print(f"Unknown cluster action: {action}")
+
 def main():
     parser = argparse.ArgumentParser(description="Sage Symbiote CLI")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -1011,6 +1173,60 @@ def main():
         help="Stream Brain logs to console (like './sage brain')"
     )
     parser_pwa.set_defaults(func=cmd_pwa)
+
+    # Mac mini all-in-one command (MLX + Brain + API + UI, no STT/TTS)
+    parser_macmini = subparsers.add_parser(
+        "macmini",
+        help="Start Mac mini all-in-one core (MLX + PWA core, no STT/TTS)"
+    )
+    parser_macmini.add_argument(
+        "--env-file",
+        default=None,
+        help="Optional path to env file (defaults to deploy/env/mac-mini-core.env)"
+    )
+    parser_macmini.set_defaults(func=cmd_macmini)
+
+    parser_cl = subparsers.add_parser(
+        "cl",
+        help="Cluster one-command control (mini + mobile over Thunderbolt/SSH)"
+    )
+    parser_cl.add_argument(
+        "action",
+        choices=["up", "down", "status", "mobile-up", "mobile-down"],
+        help="Cluster action"
+    )
+    parser_cl.add_argument(
+        "--host",
+        default=os.environ.get("SAGE_MACBOOK_HOST", "macbook-thunderbolt"),
+        help="SSH host alias for MacBook target"
+    )
+    parser_cl.add_argument(
+        "--remote-root",
+        default="~/sage",
+        help="Sage repo path on MacBook"
+    )
+    parser_cl.add_argument(
+        "--expo-port",
+        type=int,
+        default=8082,
+        help="Expo dev server port on MacBook"
+    )
+    parser_cl.add_argument(
+        "--remote-log",
+        default="/tmp/sage_mobile_expo.log",
+        help="Expo log path on MacBook"
+    )
+    parser_cl.add_argument(
+        "--no-mini",
+        action="store_true",
+        help="Skip Mac mini core actions (for up/down)"
+    )
+    parser_cl.add_argument(
+        "--no-mobile",
+        action="store_true",
+        help="Skip MacBook mobile actions (for up/down)"
+    )
+    parser_cl.set_defaults(func=cmd_cluster)
 
     # Vision Command
     parser_vision = subparsers.add_parser("vision", help="Start Vision Pipeline (Face + YOLO + VLM)")

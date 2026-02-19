@@ -9,12 +9,15 @@ import json
 import time
 import queue
 import os
+import uuid
 from datetime import datetime
 from collections import deque
 
 # Configuration
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
+CHAT_REQUEST_TOPIC = os.getenv("SAGE_BRAIN_CHAT_REQUEST_TOPIC", "sage/brain/chat/request")
+CHAT_RESPONSE_TOPIC = os.getenv("SAGE_BRAIN_CHAT_RESPONSE_TOPIC", "sage/brain/chat/response")
 
 # Global State
 response_queue = queue.Queue()
@@ -99,6 +102,9 @@ def on_message(client, userdata, msg):
     elif topic == "sage/voice/response":
         try:
             data = json.loads(payload)
+            # Ignore chunked streaming packets to avoid duplicate/split transcript lines.
+            if data.get("stream"):
+                return
             text = data.get("text", "")
             # If text is empty, fallback to raw payload but clean it
             if not text:
@@ -115,6 +121,22 @@ def on_message(client, userdata, msg):
                     text = json_obj["text"]
             except:
                 pass  # Keep original text if extraction fails
+
+        if text:
+            status.last_response = text
+            if status.request_start:
+                status.total_ms = int((time.time() - status.request_start) * 1000)
+            transcript_log.append(f"[{timestamp}] 🧠 Sage: {text}")
+            response_queue.put(text)
+    elif topic == CHAT_RESPONSE_TOPIC:
+        try:
+            data = json.loads(payload)
+            if not data.get("success", True):
+                text = f"Error: {data.get('error', 'unknown error')}"
+            else:
+                text = data.get("text", "")
+        except Exception:
+            text = payload
 
         if text:
             status.last_response = text
@@ -225,10 +247,18 @@ def send_message(msg, history):
     with response_queue.mutex:
         response_queue.queue.clear()
     
-    # Send to brain
+    # Send to brain chat RPC (direct brain test path, bypasses voice suppression rules)
     status.request_start = time.time()
-    client.publish("sage/voice/transcript", msg)
-    transcript_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] 🎤 You: {msg}")
+    request_id = str(uuid.uuid4())
+    payload = {
+        "request_id": request_id,
+        "conversation_id": "dashboard",
+        "text": msg,
+        "reason": "user_intent",
+        "response_topic": CHAT_RESPONSE_TOPIC,
+    }
+    client.publish(CHAT_REQUEST_TOPIC, json.dumps(payload))
+    transcript_log.append(f"[{datetime.now().strftime('%H:%M:%S')}] 💬 You: {msg}")
     
     # Wait for response
     history.append({"role": "assistant", "content": "..."})

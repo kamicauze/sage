@@ -5,11 +5,13 @@ from unittest.mock import patch
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int, response_payload: str):
+    def __init__(self, status_code: int, response_payload):
         self.status_code = status_code
         self._response_payload = response_payload
 
     def json(self):
+        if isinstance(self._response_payload, dict):
+            return self._response_payload
         return {"response": self._response_payload}
 
 
@@ -82,6 +84,29 @@ class IntentClassifierTests(unittest.TestCase):
         self.assertEqual(result.type, "brain_query")
         self.assertEqual(result.method, "context")
         self.assertGreaterEqual(result.confidence, 0.8)
+
+    def test_llm_fallback_supports_mlx_openai_shape(self):
+        import shared.intent as intent_mod
+
+        transcript = "yo, just checking in"
+        mlx_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"intent":"smalltalk","project":null,"confidence":0.91}'
+                    }
+                }
+            ]
+        }
+
+        with patch.dict(os.environ, {"SAGE_LOCAL_LLM_BACKEND": "mlx"}, clear=True):
+            with patch.object(intent_mod, "CONFIDENCE_THRESHOLD", 0.95):
+                with patch("requests.post", return_value=_FakeResponse(200, mlx_payload)):
+                    result = intent_mod.classify_intent(transcript, use_llm_fallback=True)
+
+        self.assertEqual(result.type, "smalltalk")
+        self.assertEqual(result.method, "llm")
+        self.assertGreaterEqual(result.confidence, 0.9)
 
 
 if __name__ == "__main__":

@@ -423,6 +423,12 @@ Set allowed origins with `SAGE_ARCHITECT_API_CORS_ORIGINS` (comma-separated):
 SAGE_ARCHITECT_API_CORS_ORIGINS=https://architect.example.com,https://app.example.com
 ```
 
+For local mobile-web development (Expo web), include the Expo origin as well, e.g.:
+
+```bash
+SAGE_ARCHITECT_API_CORS_ORIGINS=http://localhost:3000,http://localhost:19006
+```
+
 ## Production Deployment
 
 ### Using Docker

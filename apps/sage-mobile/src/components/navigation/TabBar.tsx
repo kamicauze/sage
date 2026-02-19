@@ -1,81 +1,133 @@
-
 import React from "react";
-import { StyleSheet, Pressable, View } from "react-native";
-import { Home, MessageSquare, CheckCircle, Settings } from "lucide-react-native";
-import { BlurView } from "expo-blur";
-import { COLORS, SPACING, RADIUS } from "../../constants/theme";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Grid2x2,
+  Inbox,
+  Radio,
+  Settings,
+  LucideIcon,
+} from "lucide-react-native";
+import { COLORS, LAYOUT, RADIUS, SPACING } from "../../constants/theme";
 
 export type TabName = "dashboard" | "chat" | "approvals" | "settings";
 
 interface TabBarProps {
-    activeTab: TabName;
-    onTabChange: (tab: TabName) => void;
+  activeTab: TabName;
+  onTabChange: (tab: TabName) => void;
 }
 
-export function TabBar({ activeTab, onTabChange }: TabBarProps) {
-    const tabs: { name: TabName; icon: any }[] = [
-        { name: "dashboard", icon: Home },
-        { name: "approvals", icon: CheckCircle },
-        { name: "chat", icon: MessageSquare },
-        { name: "settings", icon: Settings },
-    ];
+interface TabItem {
+  name: TabName;
+  label: string;
+  icon: LucideIcon;
+  prominent?: boolean;
+}
 
-    return (
-        <View style={styles.container}>
-            <BlurView intensity={30} tint="dark" style={styles.blur}>
-                {tabs.map((tab) => {
-                    const isActive = activeTab === tab.name;
-                    const Icon = tab.icon;
-                    return (
-                        <Pressable
-                            key={tab.name}
-                            onPress={() => onTabChange(tab.name)}
-                            style={styles.tab}
-                        >
-                            <Icon
-                                size={24}
-                                color={isActive ? COLORS.accent.primary : COLORS.text.secondary}
-                            />
-                            {isActive && <View style={styles.indicator} />}
-                        </Pressable>
-                    );
-                })}
-            </BlurView>
-        </View>
-    );
+const tabs: TabItem[] = [
+  { name: "dashboard", label: "Pulse", icon: Grid2x2 },
+  { name: "approvals", label: "Inbox", icon: Inbox },
+  { name: "chat", label: "Command", icon: Radio, prominent: true },
+  { name: "settings", label: "Settings", icon: Settings },
+];
+
+export function TabBar({ activeTab, onTabChange }: TabBarProps) {
+  return (
+    <View style={styles.wrap}>
+      <View style={styles.bar}>
+        {tabs.map((tab) => {
+          const active = tab.name === activeTab;
+          const Icon = tab.icon;
+
+          if (tab.prominent) {
+            return (
+              <Pressable
+                key={tab.name}
+                style={styles.prominentSlot}
+                onPress={() => onTabChange(tab.name)}
+              >
+                <View style={[styles.prominentButton, active && styles.prominentButtonActive]}>
+                  <Icon size={22} color={active ? COLORS.text.primary : COLORS.text.secondary} />
+                </View>
+                <Text style={[styles.label, active && styles.activeLabel]}>{tab.label}</Text>
+              </Pressable>
+            );
+          }
+
+          return (
+            <Pressable key={tab.name} style={styles.tab} onPress={() => onTabChange(tab.name)}>
+              <Icon size={20} color={active ? COLORS.accent.primary : COLORS.text.secondary} />
+              <Text style={[styles.label, active && styles.activeLabel]}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        position: "absolute",
-        bottom: SPACING.l,
-        left: SPACING.l,
-        right: SPACING.l,
-        borderRadius: RADIUS.full,
-        overflow: "hidden",
-        elevation: 10,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 10,
-    },
-    blur: {
-        flexDirection: "row",
-        justifyContent: "space-around",
-        alignItems: "center",
-        paddingVertical: SPACING.m,
-    },
-    tab: {
-        alignItems: "center",
-        justifyContent: "center",
-        padding: SPACING.s,
-    },
-    indicator: {
-        position: "absolute",
-        bottom: -8,
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: COLORS.accent.primary,
-    },
+  wrap: {
+    position: "absolute",
+    left: SPACING.s,
+    right: SPACING.s,
+    bottom: SPACING.s,
+  },
+  bar: {
+    height: LAYOUT.tabBarHeight,
+    borderRadius: RADIUS.l,
+    backgroundColor: "rgba(12, 21, 40, 0.96)",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingHorizontal: SPACING.s,
+    paddingBottom: SPACING.xs,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 18,
+  },
+  tab: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.xs,
+    minWidth: 64,
+  },
+  prominentSlot: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: SPACING.xs,
+    marginTop: -38,
+    minWidth: 82,
+  },
+  prominentButton: {
+    width: 64,
+    height: 64,
+    borderRadius: RADIUS.full,
+    backgroundColor: "rgba(18, 34, 64, 0.95)",
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  prominentButtonActive: {
+    backgroundColor: COLORS.accent.primaryStrong,
+    borderColor: "rgba(106, 159, 255, 0.8)",
+    shadowColor: COLORS.accent.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  label: {
+    fontSize: 11,
+    color: COLORS.text.secondary,
+    letterSpacing: 0.3,
+    fontWeight: "600",
+  },
+  activeLabel: {
+    color: COLORS.accent.primary,
+  },
 });

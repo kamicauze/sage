@@ -18,6 +18,13 @@ def _env_flag(name: str, default: bool = False) -> bool:
     return value.strip().lower() in TRUE_VALUES
 
 
+def _local_llm_backend() -> str:
+    backend = (os.getenv("SAGE_LOCAL_LLM_BACKEND", "ollama") or "ollama").strip().lower()
+    if backend not in {"ollama", "mlx"}:
+        return "ollama"
+    return backend
+
+
 def _parse_env_bool(name: str, default: bool):
     value = os.getenv(name)
     if value is None:
@@ -143,6 +150,31 @@ async def check_ollama():
         print(f"❌ OFFLINE ({str(e)})")
         return False
 
+
+async def check_mlx():
+    host = (os.getenv("MLX_HOST", "http://127.0.0.1:8080") or "http://127.0.0.1:8080").rstrip("/")
+    endpoint = (os.getenv("MLX_HEALTH_ENDPOINT", "/v1/models") or "/v1/models").strip()
+    if not endpoint.startswith("/"):
+        endpoint = f"/{endpoint}"
+    api_key = (os.getenv("MLX_API_KEY") or "").strip()
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    print(f"Checking MLX server at {host}{endpoint}...", end=" ", flush=True)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{host}{endpoint}", headers=headers) as resp:
+                if resp.status == 200:
+                    print("✅ ONLINE")
+                    return True
+                text = await resp.text()
+                print(f"❌ ERROR ({resp.status}: {text[:120]})")
+                return False
+    except Exception as e:
+        print(f"❌ OFFLINE ({str(e)})")
+        return False
+
 async def check_cloud(require_key: bool = False):
     grok_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
@@ -195,10 +227,11 @@ async def run_preflight_checks():
     print("✈️  SAGE PRE-FLIGHT CHECKLIST")
     print("="*40)
     config_result = await check_runtime_config()
+    local_backend = _local_llm_backend()
 
     force_cloud_reasoning = _env_flag("SAGE_FORCE_CLOUD_REASONING", False)
     if force_cloud_reasoning:
-        print("Cloud-only reasoning mode enabled: skipping Ollama health check.")
+        print("Cloud-only reasoning mode enabled: skipping local LLM health check.")
         cloud_ok, mqtt_ok = await asyncio.gather(
             check_cloud(require_key=True),
             check_mqtt(),
@@ -210,14 +243,15 @@ async def run_preflight_checks():
         print("🔴 CRITICAL CHECKS FAILED. REVIEW PRE-FLIGHT OUTPUT.\n")
         return False
 
-    ollama_ok, mqtt_ok, _ = await asyncio.gather(
-        check_ollama(),
+    llm_check = check_mlx() if local_backend == "mlx" else check_ollama()
+    llm_ok, mqtt_ok, _ = await asyncio.gather(
+        llm_check,
         check_mqtt(),
         check_cloud()
     )
 
     print("="*40)
-    if config_result["ok"] and ollama_ok and mqtt_ok: # Ollama and MQTT are critical in mixed/local mode
+    if config_result["ok"] and llm_ok and mqtt_ok: # Local LLM backend and MQTT are critical in mixed/local mode
         print("🟢 ALL SYSTEMS GO. CLEARED FOR TAKEOFF.\n")
         return True
     print("🔴 CRITICAL CHECKS FAILED. REVIEW PRE-FLIGHT OUTPUT.\n")

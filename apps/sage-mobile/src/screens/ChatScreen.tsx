@@ -1,179 +1,319 @@
-
-import React, { useRef, useEffect } from "react";
+import React from "react";
 import {
-    StyleSheet,
-    View,
-    Text,
-    TextInput,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
-import { GlassCard } from "../components/ui/GlassCard";
-import { GlassButton } from "../components/ui/GlassButton";
+import {
+  Activity,
+  ArrowRight,
+  Bug,
+  PauseCircle,
+  Radar,
+  TerminalSquare,
+} from "lucide-react-native";
 import { ScreenLayout } from "../components/layout/ScreenLayout";
-import { COLORS, SPACING, RADIUS } from "../constants/theme";
-import { Send } from "lucide-react-native";
+import { GlassButton } from "../components/ui/GlassButton";
+import { GlassCard } from "../components/ui/GlassCard";
+import { COLORS, LAYOUT, RADIUS, SPACING } from "../constants/theme";
 
 interface ChatScreenProps {
-    messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
-    onSend: (text: string) => void;
-    isSending: boolean;
+  messages: Array<{ id: string; role: "user" | "assistant"; text: string }>;
+  onSend: (text: string) => void;
+  isSending: boolean;
 }
 
+const QUICK_ACTIONS = [
+  { label: "Summarize Project Atlas", icon: Activity },
+  { label: "Scan for opportunities", icon: Radar },
+  { label: "Pause all jobs", icon: PauseCircle, variant: "danger" as const },
+  { label: "Debug Kernel", icon: Bug },
+];
+
 export function ChatScreen({ messages, onSend, isSending }: ChatScreenProps) {
-    const [text, setText] = React.useState("");
-    const flatListRef = useRef<FlatList>(null);
+  const [text, setText] = React.useState("");
 
-    useEffect(() => {
-        if (messages.length > 0) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-            }, 100);
-        }
-    }, [messages]);
+  const send = React.useCallback(() => {
+    const payload = text.trim();
+    if (!payload || isSending) {
+      return;
+    }
+    onSend(payload);
+    setText("");
+  }, [isSending, onSend, text]);
 
-    const handleSend = () => {
-        if (text.trim() && !isSending) {
-            onSend(text);
-            setText("");
-        }
+  const logs = messages.slice(-3).map((msg) => {
+    const stamp = new Date().toLocaleTimeString(undefined, {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+    return {
+      id: msg.id,
+      line: `${stamp} ${msg.role === "assistant" ? "[SYS]" : "[CMD]"} ${msg.text}`,
     };
+  });
 
-    const renderItem = ({
-        item,
-    }: {
-        item: { id: string; role: "user" | "assistant"; text: string };
-    }) => {
-        const isUser = item.role === "user";
-        return (
-            <View
-                style={[
-                    styles.bubbleWrapper,
-                    isUser ? styles.userWrapper : styles.assistantWrapper,
-                ]}
-            >
-                <GlassCard
-                    style={[
-                        styles.bubble,
-                        isUser ? styles.userBubble : styles.assistantBubble,
-                    ]}
-                    tint={isUser ? "light" : "dark"}
-                    intensity={30}
+  return (
+    <ScreenLayout>
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 70 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.statusRow}>
+            <View style={styles.statusGroup}>
+              <View style={styles.onlineDot} />
+              <Text style={styles.statusText}>SYSTEMS NOMINAL</Text>
+            </View>
+            <Text style={styles.latencyText}>12ms</Text>
+            <View style={styles.divider} />
+            <Text style={styles.linkText}>UPLINK ACTIVE</Text>
+          </View>
+
+          <View style={styles.hero}>
+            <View style={styles.heroOrb}>
+              <TerminalSquare size={38} color={COLORS.accent.info} />
+            </View>
+            <Text style={styles.heroTitle}>Command Center</Text>
+            <Text style={styles.heroSubtitle}>Ready for input. Awaiting instructions.</Text>
+          </View>
+
+          <GlassCard style={styles.commandInputCard} variant="soft">
+            <View style={styles.inputRow}>
+              <Text style={styles.prompt}>{">"}</Text>
+              <TextInput
+                style={styles.input}
+                value={text}
+                onChangeText={setText}
+                placeholder="Issue intent..."
+                placeholderTextColor={COLORS.text.tertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="send"
+                onSubmitEditing={send}
+              />
+              <GlassButton
+                onPress={send}
+                disabled={!text.trim() || isSending}
+                variant="ghost"
+                style={styles.sendButton}
+              >
+                <ArrowRight size={28} color={COLORS.accent.primary} />
+              </GlassButton>
+            </View>
+          </GlassCard>
+
+          <View style={styles.quickActionsGrid}>
+            {QUICK_ACTIONS.map((action) => {
+              const Icon = action.icon;
+              return (
+                <GlassButton
+                  key={action.label}
+                  onPress={() => undefined}
+                  variant={action.variant ?? "ghost"}
+                  style={styles.actionPill}
                 >
-                    <Text style={styles.msgText}>{item.text}</Text>
-                </GlassCard>
-            </View>
-        );
-    };
-
-    return (
-        <ScreenLayout>
-            <View style={styles.headerContainer}>
-                <Text style={styles.screenTitle}>Chat with Sage</Text>
-            </View>
-
-            <FlatList
-                ref={flatListRef}
-                data={messages}
-                renderItem={renderItem}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.list}
-            />
-
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
-                style={styles.composerContainer}
-            >
-                <GlassCard style={styles.composer} intensity={50}>
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Ask Sage..."
-                        placeholderTextColor={COLORS.text.tertiary}
-                        value={text}
-                        onChangeText={setText}
-                        multiline
+                  <View style={styles.actionContent}>
+                    <Icon
+                      size={16}
+                      color={action.variant === "danger" ? COLORS.accent.error : COLORS.text.secondary}
                     />
-                    <GlassButton
-                        onPress={handleSend}
-                        disabled={!text.trim() || isSending}
-                        style={styles.sendBtn}
-                        variant="primary"
+                    <Text
+                      style={[
+                        styles.actionText,
+                        action.variant === "danger" && styles.actionTextDanger,
+                      ]}
                     >
-                        <Send size={20} color="#FFF" />
-                    </GlassButton>
-                </GlassCard>
-            </KeyboardAvoidingView>
-        </ScreenLayout>
-    );
+                      {action.label}
+                    </Text>
+                  </View>
+                </GlassButton>
+              );
+            })}
+          </View>
+
+          <View style={styles.logBlock}>
+            {logs.length === 0 ? (
+              <>
+                <Text style={styles.logLine}>14:02:22 [SYS] Handshake completed with Node_Alpha</Text>
+                <Text style={styles.logLine}>14:02:20 [NET] Latency optimal. Packet loss 0.0%</Text>
+                <Text style={styles.logLine}>14:01:58 [AUTH] Biometric verification passed</Text>
+              </>
+            ) : (
+              logs.map((entry) => (
+                <Text key={entry.id} style={styles.logLine}>
+                  {entry.line}
+                </Text>
+              ))
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </ScreenLayout>
+  );
 }
 
 const styles = StyleSheet.create({
-    headerContainer: {
-        marginTop: SPACING.l,
-        marginBottom: SPACING.s,
-    },
-    screenTitle: {
-        fontSize: 24,
-        fontWeight: "bold",
-        color: COLORS.text.primary,
-    },
-    list: {
-        paddingBottom: 120, // Space for composer
-    },
-    bubbleWrapper: {
-        marginBottom: SPACING.s,
-        flexDirection: "row",
-    },
-    userWrapper: {
-        justifyContent: "flex-end",
-    },
-    assistantWrapper: {
-        justifyContent: "flex-start",
-    },
-    bubble: {
-        maxWidth: "80%",
-        borderRadius: RADIUS.l,
-        padding: SPACING.m,
-    },
-    userBubble: {
-        borderBottomRightRadius: 4,
-        backgroundColor: "rgba(59, 130, 246, 0.3)", // Blue tint
-    },
-    assistantBubble: {
-        borderBottomLeftRadius: 4,
-        backgroundColor: "rgba(255, 255, 255, 0.1)",
-    },
-    msgText: {
-        color: COLORS.text.primary,
-        fontSize: 16,
-        lineHeight: 22,
-    },
-    composerContainer: {
-        position: "absolute",
-        bottom: 90, // Above tab bar
-        left: 0,
-        right: 0,
-        paddingHorizontal: SPACING.m,
-    },
-    composer: {
-        flexDirection: "row",
-        alignItems: "center",
-        padding: SPACING.s,
-        borderRadius: RADIUS.full,
-    },
-    input: {
-        flex: 1,
-        color: COLORS.text.primary,
-        paddingHorizontal: SPACING.s,
-        maxHeight: 100,
-    },
-    sendBtn: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        paddingHorizontal: 0, // Override
-        paddingVertical: 0, // Override
-    },
+  container: {
+    flex: 1,
+  },
+  scroll: {
+    paddingBottom: LAYOUT.tabBarHeight + 86,
+    flexGrow: 1,
+  },
+  statusRow: {
+    marginTop: SPACING.s,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SPACING.s,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.line,
+  },
+  statusGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.s,
+  },
+  onlineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.status.online,
+  },
+  statusText: {
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    letterSpacing: 1.8,
+    fontWeight: "700",
+  },
+  latencyText: {
+    color: COLORS.text.secondary,
+    fontSize: 12,
+    marginLeft: "auto",
+    marginRight: SPACING.s,
+  },
+  divider: {
+    height: 20,
+    width: 1,
+    backgroundColor: COLORS.line,
+    marginHorizontal: SPACING.s,
+  },
+  linkText: {
+    color: COLORS.accent.info,
+    fontSize: 12,
+    letterSpacing: 1.3,
+  },
+  hero: {
+    marginTop: SPACING.xxl,
+    alignItems: "center",
+    marginBottom: SPACING.l,
+  },
+  heroOrb: {
+    width: 116,
+    height: 116,
+    borderRadius: RADIUS.full,
+    borderWidth: 1,
+    borderColor: "rgba(71, 131, 255, 0.35)",
+    backgroundColor: "rgba(24, 49, 96, 0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: COLORS.accent.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.32,
+    shadowRadius: 26,
+    elevation: 9,
+    marginBottom: SPACING.l,
+  },
+  heroTitle: {
+    color: COLORS.text.primary,
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: SPACING.s,
+  },
+  heroSubtitle: {
+    color: COLORS.text.secondary,
+    fontSize: 13,
+  },
+  commandInputCard: {
+    borderColor: "rgba(54, 117, 255, 0.6)",
+    shadowColor: COLORS.accent.primary,
+    shadowOpacity: 0.45,
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 18,
+    elevation: 9,
+    marginBottom: SPACING.l,
+  },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    minHeight: 68,
+    paddingHorizontal: SPACING.s,
+    gap: SPACING.s,
+  },
+  prompt: {
+    color: COLORS.accent.info,
+    fontSize: 22,
+    fontWeight: "500",
+    marginLeft: SPACING.s,
+  },
+  input: {
+    flex: 1,
+    color: COLORS.text.primary,
+    fontSize: 16,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    paddingVertical: SPACING.s,
+  },
+  sendButton: {
+    width: 56,
+    minHeight: 56,
+    borderRadius: RADIUS.s,
+    borderWidth: 0,
+  },
+  quickActionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: SPACING.s,
+    marginBottom: SPACING.xl,
+  },
+  actionPill: {
+    borderRadius: RADIUS.full,
+    minHeight: 52,
+    minWidth: 168,
+    borderColor: COLORS.border,
+  },
+  actionContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: SPACING.s,
+  },
+  actionText: {
+    color: COLORS.text.secondary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  actionTextDanger: {
+    color: COLORS.accent.error,
+  },
+  logBlock: {
+    marginTop: "auto",
+    paddingTop: SPACING.xl,
+    gap: SPACING.s,
+  },
+  logLine: {
+    color: "rgba(97, 117, 156, 0.62)",
+    fontSize: 12,
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+  },
 });

@@ -6,6 +6,7 @@ import time
 import sys
 import signal
 import socket
+import re
 from typing import Dict
 from uuid import uuid4
 from datetime import datetime
@@ -97,6 +98,7 @@ if FORCE_CLOUD_REASONING and not _cloud_api_key_present(CLOUD_REASONING_PROVIDER
         "Falling back to local reasoning mode."
     )
     FORCE_CLOUD_REASONING = False
+MEMORY_PRELOAD_ENABLED = _env_flag("SAGE_MEMORY_PRELOAD", True)
 
 # Initialize the state machine, escalation engine, event buffer, and summary engine
 sage = SageState()
@@ -185,6 +187,39 @@ def build_situational_summary(summary_packet, briefing):
 # Global State
 current_personality = os.getenv("DEFAULT_PERSONALITY", "kenyan_babe")
 chat_conversations: Dict[str, ConversationHistory] = {}
+
+
+def _extract_human_text(text: str) -> str:
+    """
+    Best-effort cleanup for model outputs that accidentally contain JSON blobs.
+    Returns plain assistant text when possible.
+    """
+    if not isinstance(text, str):
+        return ""
+
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+
+    # Full JSON object output -> extract text field.
+    if cleaned.startswith("{"):
+        try:
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                inner = data.get("text")
+                if isinstance(inner, str) and inner.strip():
+                    return inner.strip()
+        except Exception:
+            # Partial JSON -> salvage "text": "..." when available.
+            match = re.search(r'"text"\s*:\s*"([^"]+)', cleaned, re.DOTALL)
+            if match:
+                return match.group(1).replace('\\"', '"').strip()
+
+            # If it clearly looks like internal JSON/report noise, drop it.
+            if '"type"' in cleaned or '"report"' in cleaned or '"trigger"' in cleaned:
+                return ""
+
+    return cleaned
 
 
 def _get_chat_conversation(conversation_id: str, max_turns: int = ConversationHistory.DEFAULT_MAX_TURNS) -> ConversationHistory:
@@ -568,7 +603,8 @@ async def handle_voice_transcript(transcript: str, client):
         f"killed={streaming_state.get('killed_reason', 'no')}"
     )
 
-    response_text = result.get("text", "")
+    response_text = _extract_human_text(result.get("text", ""))
+    result["text"] = response_text
 
     # Add assistant response to conversation history
     t4 = time.time()
@@ -692,8 +728,13 @@ async def handle_chat_request(payload: dict, client):
         if payload.get("system_prompt"):
             context["chat_system_prompt"] = payload.get("system_prompt")
 
-        reason = str(payload.get("reason", "user_intent"))
-        ai_out = await advise(context, {"reason": reason}, conversation=conversation)
+        reason = str(payload.get("reason", "chat_request"))
+        chat_meta = {
+            "reason": reason,
+            "minimal_prompt": bool(payload.get("minimal_prompt", True)),
+            "allow_plain_text": bool(payload.get("allow_plain_text", True)),
+        }
+        ai_out = await advise(context, chat_meta, conversation=conversation)
         response_text = (ai_out.get("text", "") or "").strip()
 
         if not response_text:
@@ -912,13 +953,22 @@ async def main_loop():
         )
         client.loop_start()
 
-        # Preload memory system to avoid first-message latency
-        print("[Brain] Preloading memory system...")
-        preload_start = time.time()
-        from brain.memory.sage_memory import get_memory
-        _ = get_memory()  # Initialize singleton
-        preload_time = int((time.time() - preload_start) * 1000)
-        print(f"[Brain] ✓ Memory preloaded in {preload_time}ms")
+        # Preload memory system to avoid first-message latency.
+        # Keep startup resilient when memory dependencies are intentionally absent.
+        if MEMORY_PRELOAD_ENABLED:
+            print("[Brain] Preloading memory system...")
+            preload_start = time.time()
+            try:
+                from brain.memory.sage_memory import get_memory
+                _ = get_memory()  # Initialize singleton
+                preload_time = int((time.time() - preload_start) * 1000)
+                print(f"[Brain] ✓ Memory preloaded in {preload_time}ms")
+            except ImportError as e:
+                print(f"[Brain] Memory preload unavailable ({e}); continuing without long-term memory")
+            except Exception as e:
+                print(f"[Brain] Memory preload failed ({e}); continuing")
+        else:
+            print("[Brain] Memory preload disabled via SAGE_MEMORY_PRELOAD=false")
 
         # Initialize Agent bridge with live MQTT and brain function
         async def agent_brain_fn(messages):

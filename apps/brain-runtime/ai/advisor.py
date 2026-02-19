@@ -4,7 +4,12 @@ import re
 import time
 from typing import Callable, Awaitable, Optional, List, Dict
 from .model_policy import choose_model
-from .ollama_client import ollama_chat, ollama_chat_stream
+from .local_llm_client import (
+    local_chat,
+    local_chat_stream,
+    get_local_llm_backend,
+    get_local_llm_base_url,
+)
 from .personalities import (
     build_core_identity_prompt,
     build_mode_prompt,
@@ -17,7 +22,7 @@ from .context_builder import build_full_context, build_minimal_context
 from .conversation import get_conversation, ConversationHistory
 from .personality_engine import get_personality_engine, PersonalityEngine
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+LOCAL_LLM_BACKEND = get_local_llm_backend()
 
 DEFAULT_PERSONALITY = os.getenv("DEFAULT_PERSONALITY", "kenyan_babe")
 
@@ -287,6 +292,7 @@ def build_prompt_messages(
     Build prompt messages with core prompt caching and mode routing.
     """
     minimal_prompt = bool(meta.get("minimal_prompt") or context.get("minimal_prompt"))
+    force_plain_text = bool(meta.get("allow_plain_text"))
     active_personality = context.get("personality", DEFAULT_PERSONALITY)
     reason = meta.get("reason", "")
     mode_override = meta.get("mode") or context.get("mode")
@@ -296,7 +302,7 @@ def build_prompt_messages(
     if not prompt_variant:
         prompt_variant = "full" if mode in ("supportive", "reflective") else "light"
     # Will be updated after we determine skip_json
-    allow_plain_text = minimal_prompt or mode in ("supportive", "reflective")
+    allow_plain_text = force_plain_text or minimal_prompt or mode in ("supportive", "reflective")
     trigger = context.get("trigger", {}) if context else {}
     user_text = trigger.get("text", "")
     tone = classify_tone(user_text)
@@ -314,10 +320,15 @@ def build_prompt_messages(
     # Skip JSON schema for emotional/conversational contexts - let the model talk naturally
     is_emotional = tone in ("tender", "frustrated") or _is_grief_disclosure(user_text)
     is_conversational = reason in ("smalltalk", "user_intent") and mode == "supportive"
-    skip_json = is_emotional or is_conversational
+    is_chat_request = trigger.get("type") == "chat_request" or reason == "chat_request"
+    skip_json = force_plain_text or is_emotional or is_conversational or is_chat_request
 
     if skip_json:
-        print(f"[Prompt] Skipping JSON schema - emotional={is_emotional}, conversational={is_conversational}, tone={tone}")
+        print(
+            f"[Prompt] Skipping JSON schema - force_plain_text={force_plain_text}, "
+            f"chat_request={is_chat_request}, emotional={is_emotional}, "
+            f"conversational={is_conversational}, tone={tone}"
+        )
         allow_plain_text = True
 
     mode_prompt = "" if minimal_prompt else f"{build_mode_prompt(mode, skip_json_schema=skip_json)}\n\n{tone_hint}"
@@ -471,11 +482,13 @@ async def advise(
 
     policy = choose_model(meta, context)
     model = policy["model"]
+    model_tier = policy.get("tier", "mid")
     options = policy["options"]
 
     # Choose prompt style based on self-aware mode
     reason = meta.get("reason", "")
-    use_minimal = FAST_MODE and reason in ("user_intent", "smalltalk")
+    force_minimal = bool(meta.get("minimal_prompt"))
+    use_minimal = force_minimal or (FAST_MODE and reason in ("user_intent", "smalltalk", "chat_request"))
     if use_minimal and conversation and not conversation.is_empty():
         trigger = context.get("trigger", {}) if context else {}
         user_text = trigger.get("text", "")
@@ -571,7 +584,11 @@ async def advise(
     system_tokens = prompt_meta["system_words"]
     context_tokens = len(json.dumps(ctx_to_send).split())
     total_input_tokens = system_tokens + context_tokens
-    print(f"[AI] Calling Ollama model={model}, reason={reason}, fast={use_minimal}, self_aware={SELF_AWARE_MODE}")
+    llm_base_url = get_local_llm_base_url(LOCAL_LLM_BACKEND, tier=model_tier)
+    print(
+        f"[AI] Calling local LLM backend={LOCAL_LLM_BACKEND} host={llm_base_url} "
+        f"tier={model_tier} model={model}, reason={reason}, fast={use_minimal}, self_aware={SELF_AWARE_MODE}"
+    )
     print(
         f"[AI] Input size: core={prompt_meta['core_words']}w, "
         f"mode={prompt_meta['mode_words']}w, system_sent={system_tokens}w, "
@@ -661,28 +678,28 @@ async def advise(
 
         # Use streaming if callback provided OR stream flag is True
         if stream or on_token:
-            response_text = await ollama_chat_stream(
-                base_url=OLLAMA_HOST,
+            response_text = await local_chat_stream(
                 model=model,
                 messages=messages,
                 options=options,
                 on_token=on_token,
-                format_json=format_json
+                format_json=format_json,
+                tier=model_tier,
             )
         else:
-            response_text = await ollama_chat(
-                base_url=OLLAMA_HOST,
+            response_text = await local_chat(
                 model=model,
                 messages=messages,
                 format_json=format_json,
-                options=options
+                options=options,
+                tier=model_tier,
             )
         
         duration = int((time.time() - start_time) * 1000)
         print(f"[Latency] llm_call: {duration}ms")
-        print(f"[AI] Ollama response received in {duration}ms")
+        print(f"[AI] Local LLM response received in {duration}ms")
     except Exception as e:
-        print(f"[AI] ollama_chat failed: {str(e)}")
+        print(f"[AI] local_llm_chat failed: {str(e)}")
         return {"model": model, "type": "none", "error": str(e)}
 
     try:

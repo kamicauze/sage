@@ -512,9 +512,25 @@ def _llm_classify(transcript: str, hint: Intent = None) -> Optional[Intent]:
     """
     try:
         import requests
-        
+
+        backend = (os.getenv("SAGE_LOCAL_LLM_BACKEND", "ollama") or "ollama").strip().lower()
+        if backend not in {"ollama", "mlx"}:
+            backend = "ollama"
+
         ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        mlx_host = (os.getenv("MLX_HOST", "http://127.0.0.1:8080") or "http://127.0.0.1:8080").rstrip("/")
+        mlx_chat_endpoint = (os.getenv("MLX_CHAT_ENDPOINT", "/v1/chat/completions") or "/v1/chat/completions").strip()
+        if not mlx_chat_endpoint.startswith("/"):
+            mlx_chat_endpoint = f"/{mlx_chat_endpoint}"
+
         model = os.getenv("OLLAMA_MODEL_FAST", "gemma3:4b")  # Use smallest model
+        if backend == "mlx":
+            model = (
+                os.getenv("MLX_MODEL_FAST")
+                or os.getenv("MLX_MODEL")
+                or os.getenv("OLLAMA_MODEL_FAST")
+                or "mlx-community/Qwen2.5-3B-Instruct-4bit"
+            )
         
         # Build prompt with hint from rule-based classification
         hint_text = ""
@@ -539,21 +555,47 @@ Also extract the target project if mentioned (brain, sage, flight_review).
 Respond with ONLY valid JSON:
 {{"intent": "architect_task"|"brain_query"|"smalltalk"|"home_control", "project": "sage_brain"|"flight_review"|null, "confidence": 0.0-1.0}}'''
 
-        response = requests.post(
-            f"{ollama_host}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.1, "num_predict": 100}
-            },
-            timeout=5  # 5 second timeout
-        )
+        if backend == "mlx":
+            headers = {"Content-Type": "application/json"}
+            mlx_api_key = (os.getenv("MLX_API_KEY") or "").strip()
+            if mlx_api_key:
+                headers["Authorization"] = f"Bearer {mlx_api_key}"
+
+            response = requests.post(
+                f"{mlx_host}{mlx_chat_endpoint}",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                    "temperature": 0.1,
+                    "max_tokens": 180,
+                    "response_format": {"type": "json_object"},
+                },
+                headers=headers,
+                timeout=5,
+            )
+        else:
+            response = requests.post(
+                f"{ollama_host}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 100}
+                },
+                timeout=5  # 5 second timeout
+            )
         
         if response.status_code != 200:
             return None
         
-        result_text = response.json().get("response", "")
+        if backend == "mlx":
+            data = response.json()
+            choices = data.get("choices") or []
+            message = choices[0].get("message", {}) if choices else {}
+            result_text = message.get("content", "")
+        else:
+            result_text = response.json().get("response", "")
         
         # Parse JSON from response
         # Handle potential markdown code blocks

@@ -1,53 +1,67 @@
-
 import React from "react";
-import { StyleSheet, View, ViewStyle, Platform, StyleProp } from "react-native";
-import { BlurView } from "expo-blur";
+import { StyleProp, StyleSheet, View, ViewStyle } from "react-native";
 import { COLORS, RADIUS, SPACING } from "../../constants/theme";
 
 interface GlassCardProps {
-    children: React.ReactNode;
-    style?: StyleProp<ViewStyle>;
-    intensity?: number;
-    tint?: "light" | "dark" | "default";
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  padded?: boolean;
+  variant?: "default" | "soft" | "outline" | "critical";
 }
 
-export function GlassCard({
-    children,
-    style,
-    intensity = 20,
-    tint = "dark",
-}: GlassCardProps) {
-    if (Platform.OS === "android") {
-        // Fallback for Android which has limited BlurView support in some versions/contexts
-        // or just to be safe with performance.
-        return (
-            <View style={[styles.androidContainer, style]}>
-                {children}
-            </View>
-        );
-    }
+const VARIANT_STYLE: Record<NonNullable<GlassCardProps["variant"]>, ViewStyle> = {
+  default: {
+    backgroundColor: COLORS.panel,
+    borderColor: COLORS.border,
+  },
+  soft: {
+    backgroundColor: COLORS.panelSoft,
+    borderColor: COLORS.border,
+  },
+  outline: {
+    backgroundColor: "rgba(8, 17, 37, 0.65)",
+    borderColor: COLORS.line,
+  },
+  critical: {
+    backgroundColor: "rgba(46, 19, 31, 0.85)",
+    borderColor: "rgba(255, 95, 97, 0.4)",
+  },
+};
 
-    return (
-        <BlurView intensity={intensity} tint={tint} style={[styles.container, style]}>
-            {children}
-        </BlurView>
-    );
+export function GlassCard({
+  children,
+  style,
+  padded = true,
+  variant = "default",
+}: GlassCardProps) {
+  return (
+    <View
+      style={[
+        styles.container,
+        VARIANT_STYLE[variant],
+        padded ? styles.padded : styles.unpadded,
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        borderRadius: RADIUS.m,
-        overflow: "hidden",
-        backgroundColor: COLORS.glass.background,
-        borderColor: COLORS.glass.border,
-        borderWidth: 1,
-        padding: SPACING.m,
-    },
-    androidContainer: {
-        borderRadius: RADIUS.m,
-        backgroundColor: "rgba(30, 30, 30, 0.85)", // Solid/Semi-transparent dark for Android
-        borderColor: COLORS.glass.border,
-        borderWidth: 1,
-        padding: SPACING.m,
-    },
+  container: {
+    borderRadius: RADIUS.m,
+    borderWidth: 1,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  padded: {
+    padding: SPACING.m,
+  },
+  unpadded: {
+    padding: 0,
+  },
 });

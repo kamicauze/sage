@@ -20,6 +20,8 @@ _DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:19006",
+    "http://127.0.0.1:19006",
 )
 _AUTH_EXEMPT_PREFIXES = ("/docs", "/redoc", "/openapi.json")
 
