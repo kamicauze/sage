@@ -10,11 +10,15 @@ Dedicated mobile app for human-in-the-middle control of Sage.
 ## Current MVP
 
 - Configure Architect API URL and token
+- Optional Tailscale API URL with automatic fallback between Tailnet and LAN
 - Chat with Sage through Architect API (`POST /chat`, provider=`brain`)
+- Streaming chat support via `POST /chat/stream` with fallback to non-stream
+- AI News tab powered by `GET /news/ai` (RSS + optional X/Nitter sources)
 - List pending approval proposals (`GET /approvals/pending`)
 - Open proposal detail (title, summary, actions, metadata)
 - Approve/deny actions (`POST /approvals/{id}/decision`)
-- Save API settings locally on device
+- Persist chat sessions locally for testing continuity
+- Save API token in secure device storage when supported
 
 ## Run
 

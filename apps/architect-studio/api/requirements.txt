@@ -5,3 +5,4 @@ pydantic
 python-multipart
 pyyaml
 paho-mqtt
+requests

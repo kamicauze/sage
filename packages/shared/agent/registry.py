@@ -14,6 +14,7 @@ from .config import AgentConfig
 from .base import Agent
 from .tools import Tool
 from .state import TaskStatus
+from .task_store import TaskStore
 
 
 class AgentRegistry:
@@ -28,6 +29,7 @@ class AgentRegistry:
         self._mqtt = None
         self._brain_fn = None
         self._tool_factory = None
+        self.task_store = TaskStore()
 
     @classmethod
     def get(cls, config_dir: str = "agents") -> "AgentRegistry":
@@ -107,7 +109,15 @@ class AgentRegistry:
         )
 
         effective_goal = goal or config.goal
-        self.running[agent.context.task_id] = agent
+        task_id = agent.context.task_id
+        self.running[task_id] = agent
+
+        # Persist to durable queue
+        try:
+            self.task_store.enqueue(config_name, effective_goal, json.dumps(config.to_dict()))
+            self.task_store.mark_running(task_id)
+        except Exception as e:
+            print(f"[AgentRegistry] TaskStore persist warning: {e}")
 
         # Publish registry status
         self._publish_registry_status()
@@ -115,18 +125,52 @@ class AgentRegistry:
         # Run in background task
         asyncio.ensure_future(self._run_and_cleanup(agent, effective_goal))
 
-        print(f"[AgentRegistry] Started agent '{config_name}' — task_id={agent.context.task_id}")
+        print(f"[AgentRegistry] Started agent '{config_name}' — task_id={task_id}")
         return agent
 
     async def _run_and_cleanup(self, agent: Agent, goal: str):
         """Run agent and clean up when done."""
+        task_id = agent.context.task_id
         try:
             await agent.run(goal)
+            try:
+                self.task_store.mark_completed(task_id, summary=goal[:200])
+            except Exception:
+                pass
         except Exception as e:
             print(f"[AgentRegistry] Agent '{agent.config.name}' crashed: {e}")
             agent.context.status = TaskStatus.FAILED
+            try:
+                self.task_store.mark_failed(task_id, error=str(e)[:500])
+            except Exception:
+                pass
         finally:
             self._publish_registry_status()
+
+    async def resume_pending(self):
+        """Called on startup. Resume QUEUED tasks and clean up stale RUNNING tasks."""
+        try:
+            cleaned = self.task_store.cleanup_stale()
+            if cleaned:
+                print(f"[AgentRegistry] Cleaned {cleaned} stale running tasks")
+
+            pending = self.task_store.get_pending()
+            if not pending:
+                return
+
+            print(f"[AgentRegistry] Resuming {len(pending)} pending tasks")
+            for task in pending:
+                agent_name = task.get("agent_name", "")
+                goal = task.get("goal", "")
+                if agent_name in self.configs:
+                    await self.start_agent(agent_name, goal=goal)
+                else:
+                    print(f"[AgentRegistry] Cannot resume '{agent_name}': config not found")
+                    self.task_store.mark_failed(
+                        task["id"], error=f"Agent config '{agent_name}' not found on restart"
+                    )
+        except Exception as e:
+            print(f"[AgentRegistry] Error resuming pending tasks: {e}")
 
     def stop_agent(self, task_id: str) -> bool:
         """Stop a running agent by task_id."""

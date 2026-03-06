@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, Callable, Awaitable
 from .state import TaskStatus, TaskContext, Observation
 from .tools import Tool
 from .config import AgentConfig
+from .policy import AgentToolPolicy
 
 
 class Agent:
@@ -39,6 +40,7 @@ class Agent:
         self.topic = config.mqtt_topic_prefix or f"sage/agent/{config.name}"
         self._running = False
         self._approval_futures: Dict[str, asyncio.Future] = {}
+        self.policy = AgentToolPolicy.from_env()
 
     # --- Public API ---
 
@@ -104,8 +106,20 @@ class Agent:
                 )
                 continue
 
+            if not self.policy.is_tool_allowed(tool.name):
+                self.context.observations.append(
+                    Observation(
+                        tool=tool.name,
+                        params=action.get("params", {}),
+                        result=f"Policy blocked tool '{tool.name}'",
+                    )
+                )
+                self._publish_status("policy_blocked", tool=tool.name)
+                continue
+
             # Approval gate
-            if tool.needs_approval:
+            requires_approval = self.policy.requires_approval(tool.name, tool.needs_approval)
+            if requires_approval:
                 self.context.status = TaskStatus.WAITING_APPROVAL
                 reason = action.get("reason", f"Run {tool.name}")
                 approved = await self._ask_user(

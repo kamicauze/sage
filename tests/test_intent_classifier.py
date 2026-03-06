@@ -108,6 +108,15 @@ class IntentClassifierTests(unittest.TestCase):
         self.assertEqual(result.method, "llm")
         self.assertGreaterEqual(result.confidence, 0.9)
 
+    def test_scene_command_classifies_as_home_control(self):
+        import shared.intent as intent_mod
+
+        result = intent_mod.classify_intent("run bedtime scene", use_llm_fallback=False)
+
+        self.assertEqual(result.type, "home_control")
+        self.assertEqual(result.method, "rule")
+        self.assertGreaterEqual(result.confidence, 0.7)
+
 
 if __name__ == "__main__":
     unittest.main()

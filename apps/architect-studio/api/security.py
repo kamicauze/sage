@@ -31,7 +31,7 @@ class APISecurityConfig:
     token: str | None
     auth_required: bool
     cors_origins: list[str]
-    auth_exempt_paths: tuple[str, ...] = ("/", "/stats/health")
+    auth_exempt_paths: tuple[str, ...] = ("/", "/stats/health", "/google/auth/callback")
 
 
 def _parse_bool(raw: str | None, default: bool = False) -> bool:

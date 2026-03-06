@@ -1,15 +1,27 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import {
-  Grid2x2,
-  Inbox,
+  ListTodo,
+  Mail,
+  Newspaper,
   Radio,
+  SlidersHorizontal,
   Settings,
   LucideIcon,
 } from "lucide-react-native";
 import { COLORS, LAYOUT, RADIUS, SPACING } from "../../constants/theme";
 
-export type TabName = "dashboard" | "chat" | "approvals" | "settings";
+export type TabName =
+  | "dashboard"
+  | "chat"
+  | "approvals"
+  | "control"
+  | "plan"
+  | "gmail"
+  | "tasks"
+  | "news"
+  | "permissions"
+  | "settings";
 
 interface TabBarProps {
   activeTab: TabName;
@@ -20,13 +32,14 @@ interface TabItem {
   name: TabName;
   label: string;
   icon: LucideIcon;
-  prominent?: boolean;
 }
 
 const tabs: TabItem[] = [
-  { name: "dashboard", label: "Pulse", icon: Grid2x2 },
-  { name: "approvals", label: "Inbox", icon: Inbox },
-  { name: "chat", label: "Command", icon: Radio, prominent: true },
+  { name: "control", label: "Control", icon: SlidersHorizontal },
+  { name: "gmail", label: "Gmail", icon: Mail },
+  { name: "chat", label: "Chat", icon: Radio },
+  { name: "tasks", label: "Tasks", icon: ListTodo },
+  { name: "news", label: "News", icon: Newspaper },
   { name: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -37,21 +50,6 @@ export function TabBar({ activeTab, onTabChange }: TabBarProps) {
         {tabs.map((tab) => {
           const active = tab.name === activeTab;
           const Icon = tab.icon;
-
-          if (tab.prominent) {
-            return (
-              <Pressable
-                key={tab.name}
-                style={styles.prominentSlot}
-                onPress={() => onTabChange(tab.name)}
-              >
-                <View style={[styles.prominentButton, active && styles.prominentButtonActive]}>
-                  <Icon size={22} color={active ? COLORS.text.primary : COLORS.text.secondary} />
-                </View>
-                <Text style={[styles.label, active && styles.activeLabel]}>{tab.label}</Text>
-              </Pressable>
-            );
-          }
 
           return (
             <Pressable key={tab.name} style={styles.tab} onPress={() => onTabChange(tab.name)}>
@@ -93,33 +91,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: SPACING.xs,
-    minWidth: 64,
-  },
-  prominentSlot: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: SPACING.xs,
-    marginTop: -38,
-    minWidth: 82,
-  },
-  prominentButton: {
-    width: 64,
-    height: 64,
-    borderRadius: RADIUS.full,
-    backgroundColor: "rgba(18, 34, 64, 0.95)",
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  prominentButtonActive: {
-    backgroundColor: COLORS.accent.primaryStrong,
-    borderColor: "rgba(106, 159, 255, 0.8)",
-    shadowColor: COLORS.accent.primary,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 10,
+    minWidth: 52,
   },
   label: {
     fontSize: 11,

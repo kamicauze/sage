@@ -7,7 +7,9 @@ import sys
 import signal
 import socket
 import re
-from typing import Dict
+import shutil
+from pathlib import Path
+from typing import Any, Dict, Optional
 from uuid import uuid4
 from datetime import datetime
 from dotenv import load_dotenv
@@ -46,6 +48,9 @@ from ai.warmup import run_preflight_checks
 from ai.conversation import ConversationHistory, get_conversation  # NEW: Conversation history
 from perception.parser import parse_presence
 from action.router import route
+from integrations.smartthings import handle_home_control_request
+from integrations.google_workspace import handle_google_workspace_text
+from integrations.project_git import handle_project_git_text
 try:
     from core.response_contract import normalize_router_result, normalize_voice_response
 except ImportError:
@@ -56,15 +61,39 @@ from voice.handler import VoiceHandler
 from voice.streamer import TTSStreamer
 from bridges.architect_bridge import ArchitectBridge
 from bridges.agent_bridge import AgentBridge
+from shared.intent import Intent, classify_intent, get_task_type_from_intent
+from text_intent_router import (
+    looks_like_architect_text_request,
+    parse_text_intent_command,
+)
 
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 CHAT_REQUEST_TOPIC = os.getenv("SAGE_BRAIN_CHAT_REQUEST_TOPIC", "sage/brain/chat/request")
 CHAT_RESPONSE_TOPIC = os.getenv("SAGE_BRAIN_CHAT_RESPONSE_TOPIC", "sage/brain/chat/response")
+BRAIN_CONFIG_TOPIC = os.getenv("SAGE_BRAIN_CONFIG_TOPIC", "sage/brain/config")
+BRAIN_COMMAND_TOPIC = os.getenv("SAGE_BRAIN_COMMAND_TOPIC", "sage/brain/command")
+BRAIN_STATUS_TOPIC = os.getenv("SAGE_BRAIN_STATUS_TOPIC", "sage/brain/status")
+MQTT_SUBSCRIPTIONS = [
+    "sage/sensors/+/presence",   # Canonical presence sensors
+    "sage/presence/+",           # Compatibility presence topic
+    "sage/vision/+/vlm",         # Vision-language summaries from camera nodes
+    "sage/vision/+/metrics",     # Vision latency/queue metrics
+    "sage/voice/transcript",     # Voice commands from STT
+    CHAT_REQUEST_TOPIC,          # Text chat RPC for API/mobile
+    BRAIN_CONFIG_TOPIC,          # Brain configuration
+    BRAIN_COMMAND_TOPIC,         # Brain commands (clear memory, etc.)
+    "sage/agent/+/needs_approval",
+    "sage/agent/+/status",
+    "sage/agent/+/command",
+]
 
 # Performance: Enable streaming TTS for lower perceived latency
 # Disabled by default - can cause duplicate responses if not handled carefully
 STREAM_TTS = os.getenv("SAGE_STREAM_TTS", "true").lower() == "true"
+VOICE_INPUT_ENABLED = os.getenv("SAGE_VOICE_INPUT_ENABLED", "true").lower() == "true"
+VOICE_OUTPUT_ENABLED = os.getenv("SAGE_VOICE_OUTPUT_ENABLED", "true").lower() == "true"
+CHAT_MINIMAL_PROMPT_DEFAULT = os.getenv("SAGE_CHAT_MINIMAL_PROMPT_DEFAULT", "false").lower() == "true"
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -99,6 +128,15 @@ if FORCE_CLOUD_REASONING and not _cloud_api_key_present(CLOUD_REASONING_PROVIDER
     )
     FORCE_CLOUD_REASONING = False
 MEMORY_PRELOAD_ENABLED = _env_flag("SAGE_MEMORY_PRELOAD", True)
+
+# Approval gate for cloud calls (opt-in)
+REQUIRE_CLOUD_APPROVAL = _env_flag("SAGE_REQUIRE_CLOUD_APPROVAL", False)
+APPROVAL_TIMEOUT_S = int(os.getenv("SAGE_APPROVAL_TIMEOUT_S", "30"))
+ARCHITECT_API_URL = (os.getenv("SAGE_ARCHITECT_API_URL", "http://localhost:8000") or "http://localhost:8000").rstrip("/")
+
+# Request deduplication
+_REQUEST_DEDUP_CACHE: Dict[str, float] = {}
+DEDUP_WINDOW_SEC = int(os.getenv("SAGE_DEDUP_WINDOW_SEC", "300"))
 
 # Initialize the state machine, escalation engine, event buffer, and summary engine
 sage = SageState()
@@ -186,7 +224,35 @@ def build_situational_summary(summary_packet, briefing):
 
 # Global State
 current_personality = os.getenv("DEFAULT_PERSONALITY", "kenyan_babe")
+current_raw_mode = os.getenv("SAGE_RAW_MODE", "false").lower() == "true"
 chat_conversations: Dict[str, ConversationHistory] = {}
+_external_cli_client = None
+
+
+def _subscribe_all_topics(client: mqtt.Client):
+    """Subscribe to all runtime topics (startup + reconnect-safe)."""
+    for topic in MQTT_SUBSCRIPTIONS:
+        client.subscribe(topic)
+
+
+def _on_mqtt_connect(client, userdata, flags, rc, properties=None):
+    if rc == 0:
+        print("[MQTT] Connected to broker")
+        _subscribe_all_topics(client)
+        print(
+            "[MQTT] Subscribed to: sage/sensors/+/presence, sage/presence/+, "
+            "sage/vision/+/vlm, sage/vision/+/metrics, "
+            f"sage/voice/transcript, {CHAT_REQUEST_TOPIC}, {BRAIN_CONFIG_TOPIC}, sage/agent/+/*"
+        )
+    else:
+        print(f"[MQTT] Connect failed rc={rc}")
+
+
+def _on_mqtt_disconnect(client, userdata, rc, properties=None):
+    if rc == 0:
+        print("[MQTT] Disconnected cleanly")
+    else:
+        print(f"[MQTT] Disconnected unexpectedly rc={rc}; waiting for reconnect")
 
 
 def _extract_human_text(text: str) -> str:
@@ -222,6 +288,19 @@ def _extract_human_text(text: str) -> str:
     return cleaned
 
 
+def _publish_brain_status(client: mqtt.Client, status: str = "ready", last_command: Optional[str] = None):
+    payload = {
+        "status": status,
+        "personality": current_personality,
+        "raw_mode": bool(current_raw_mode),
+        "voice_input_enabled": bool(VOICE_INPUT_ENABLED),
+        "voice_output_enabled": bool(VOICE_OUTPUT_ENABLED),
+        "last_command": last_command,
+        "ts": int(time.time() * 1000),
+    }
+    client.publish(BRAIN_STATUS_TOPIC, json.dumps(payload), retain=True)
+
+
 def _get_chat_conversation(conversation_id: str, max_turns: int = ConversationHistory.DEFAULT_MAX_TURNS) -> ConversationHistory:
     conversation = chat_conversations.get(conversation_id)
     if conversation is None:
@@ -229,16 +308,171 @@ def _get_chat_conversation(conversation_id: str, max_turns: int = ConversationHi
         chat_conversations[conversation_id] = conversation
     return conversation
 
+
+def _looks_like_research_text(text: str) -> bool:
+    lowered = str(text or "").lower()
+    if not lowered:
+        return False
+    markers = (
+        "research",
+        "analyze",
+        "analysis",
+        "deep dive",
+        "benchmark",
+        "compare",
+        "investigate",
+        "study",
+        "literature",
+        "evidence",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _resolve_cli_override(intent_type: str, text: str) -> Optional[Dict[str, str]]:
+    """
+    Resolve external CLI routing override from env.
+
+    SAGE_TEXT_CLI_PROVIDER: off|codex_cli|claude_cli
+    SAGE_TEXT_CLI_SCOPE: architect,debug,research,all
+    SAGE_TEXT_CLI_MODEL: optional model label passed to CLI
+    """
+    provider = (os.getenv("SAGE_TEXT_CLI_PROVIDER", "off") or "off").strip().lower()
+    if provider not in {"codex_cli", "claude_cli"}:
+        return None
+
+    scope_raw = (os.getenv("SAGE_TEXT_CLI_SCOPE", "architect,debug,research") or "").strip().lower()
+    scope = {part.strip() for part in scope_raw.split(",") if part.strip()}
+    if not scope:
+        scope = {"architect"}
+    if "all" in scope:
+        enabled = True
+    else:
+        lowered = str(text or "").lower()
+        debug_markers = {"debug", "fix", "traceback", "stack trace", "failing test"}
+        enabled = (
+            ("architect" in scope and intent_type == "architect_task")
+            or ("debug" in scope and any(marker in lowered for marker in debug_markers))
+            or ("research" in scope and _looks_like_research_text(text))
+        )
+
+    if not enabled:
+        return None
+
+    model = (os.getenv("SAGE_TEXT_CLI_MODEL") or "").strip() or provider
+    return {"provider": provider, "model": model}
+
+
+def _get_external_cli_client():
+    global _external_cli_client
+    if _external_cli_client is not None:
+        return _external_cli_client
+
+    from architect.llm import LLMClient
+    _external_cli_client = LLMClient()
+    return _external_cli_client
+
+
+async def _chat_with_external_cli(messages: list, provider: str, model: Optional[str] = None) -> str:
+    client = _get_external_cli_client()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: client.chat(messages, stream=False, provider=provider, model=model),
+    )
+
+
+def _apply_architect_artifacts_to_repo(
+    *,
+    architect_bridge: ArchitectBridge,
+    project_hint: Optional[str],
+    artifacts: list,
+) -> Dict[str, Any]:
+    """
+    Copy generated artifacts from Architect workspace sandbox into repo files.
+    This is opt-in from text commands to support real file edits.
+    """
+    if not artifacts:
+        return {
+            "copied_count": 0,
+            "skipped_count": 0,
+            "copied": [],
+            "skipped": [{"path": "", "reason": "no_artifacts"}],
+        }
+
+    manifest_path = architect_bridge._resolve_manifest(project_hint) if architect_bridge else None
+    if not manifest_path:
+        return {
+            "copied_count": 0,
+            "skipped_count": len(artifacts),
+            "copied": [],
+            "skipped": [{"path": str(p), "reason": "manifest_not_found"} for p in artifacts],
+        }
+
+    from architect.manifest import ProjectManifest
+    from architect.paths import workspace_sandbox_path
+
+    manifest = ProjectManifest.load(str(manifest_path))
+    sandbox_root = Path(workspace_sandbox_path(manifest.id)).resolve()
+    repo_root = Path(manifest.repo_path).resolve()
+
+    copied = []
+    skipped = []
+
+    for rel_path in artifacts:
+        rel_str = str(rel_path or "").strip()
+        if not rel_str:
+            continue
+
+        src = (sandbox_root / rel_str).resolve()
+        if not src.exists() or not src.is_file():
+            skipped.append({"path": rel_str, "reason": "source_missing"})
+            continue
+
+        dst = (repo_root / rel_str).resolve()
+        try:
+            dst.relative_to(repo_root)
+        except Exception:
+            skipped.append({"path": rel_str, "reason": "unsafe_destination"})
+            continue
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(rel_str)
+
+    return {
+        "copied_count": len(copied),
+        "skipped_count": len(skipped),
+        "copied": copied,
+        "skipped": skipped,
+    }
+
 async def on_event(event_data, on_token=None):
     """
     Handles derived events (occupied, quiet, escalation, etc.)
     """
+    global _REQUEST_DEDUP_CACHE
+
     if not event_data:
         return
-        
+
     event_type = event_data.get("type")
     event_source = event_data.get("source")
-    
+
+    # Request deduplication: skip duplicate queries within the window
+    user_text_dedup = event_data.get("text", "")
+    if user_text_dedup and DEDUP_WINDOW_SEC > 0:
+        import hashlib as _hl
+        dedup_key = _hl.md5(f"{event_type}:{user_text_dedup}".encode()).hexdigest()
+        now = time.time()
+        _REQUEST_DEDUP_CACHE = {
+            k: v for k, v in _REQUEST_DEDUP_CACHE.items() if now - v < DEDUP_WINDOW_SEC
+        }
+        if dedup_key in _REQUEST_DEDUP_CACHE:
+            elapsed = now - _REQUEST_DEDUP_CACHE[dedup_key]
+            print(f"[Dedup] Skipping duplicate request (seen {elapsed:.1f}s ago)")
+            return {"type": "none", "dedup": True}
+        _REQUEST_DEDUP_CACHE[dedup_key] = now
+
     # Store event in buffer for history
     buffer.push(event_data)
     
@@ -304,27 +538,83 @@ async def on_event(event_data, on_token=None):
         except Exception as e:
             print(f"[NervousSystem] Failed to process communication feedback: {e}")
     
+    skip_router = False
+    ai_out = None
+
+    if user_text_original and event_type in ("user_intent", "smalltalk"):
+        project_git_result = handle_project_git_text(user_text=user_text_original)
+        if project_git_result.get("handled"):
+            ai_out = {
+                "type": "suggestion",
+                "text": project_git_result.get("response_text", ""),
+                "confidence": 1.0,
+                "model": "project_git",
+                "report": summary_packet,
+            }
+
+    if event_type == "home_control":
+        smartthings_result = await handle_home_control_request(user_text_original)
+        if smartthings_result.get("handled"):
+            skip_router = True
+            success = bool(smartthings_result.get("success"))
+            ai_out = {
+                "type": "suggestion",
+                "text": smartthings_result.get("text", "Done."),
+                "confidence": 1.0 if success else 0.5,
+                "model": "smartthings",
+                "report": summary_packet,
+            }
+
     # FAST PATH: Skip local LLM if user explicitly asked for cloud,
     # or if global cloud-only reasoning mode is enabled.
-    if direct_cloud_reasoning and event_type in ("user_intent", "smalltalk", "home_control"):
-        handoff_reason = "explicit_grok_request" if explicit_grok_request else "forced_cloud_mode"
-        if explicit_grok_request:
-            print("[NervousSystem] Fast path: Direct cloud handoff (explicit request, skipping local LLM)")
+    if ai_out is None:
+        if direct_cloud_reasoning and event_type in ("user_intent", "smalltalk", "home_control"):
+            handoff_reason = "explicit_grok_request" if explicit_grok_request else "forced_cloud_mode"
+            if explicit_grok_request:
+                print("[NervousSystem] Fast path: Direct cloud handoff (explicit request, skipping local LLM)")
+            else:
+                print(
+                    f"[NervousSystem] Cloud-only mode: Direct {CLOUD_REASONING_PROVIDER} handoff "
+                    f"(skipping local LLM)"
+                )
+            ai_out = {"type": "handoff", "reason": handoff_reason}
+        elif is_smalltalk:
+            meta = {"reason": "smalltalk"}
+            ai_out = await advise(context, meta, conversation=conversation, on_token=on_token)
         else:
+            meta = {"reason": event_type}
+            ai_out = await advise(context, meta, conversation=conversation, on_token=on_token)
+
+    # --- Confidence-based smart escalation ---
+    if ai_out and ai_out.get("type") not in ("handoff", "none", None):
+        from ai.escalation import should_escalate_to_cloud
+        should_escalate, escalation_reason = should_escalate_to_cloud(
+            ai_out, event_type, meta.get("reason", "") if meta else "",
+            user_text_original, cloud_provider=CLOUD_REASONING_PROVIDER
+        )
+        if should_escalate:
+            original_conf = ai_out.get("confidence", "N/A")
+            original_model = ai_out.get("model", "unknown")
             print(
-                f"[NervousSystem] Cloud-only mode: Direct {CLOUD_REASONING_PROVIDER} handoff "
-                f"(skipping local LLM)"
+                f"[Escalation] Triggering cloud handoff: reason={escalation_reason}, "
+                f"confidence={original_conf}, model={original_model}"
             )
-        ai_out = {"type": "handoff", "reason": handoff_reason}
-    elif is_smalltalk:
-        meta = {"reason": "smalltalk"}
-        ai_out = await advise(context, meta, conversation=conversation, on_token=on_token)
-    else:
-        meta = {"reason": event_type}
-        ai_out = await advise(context, meta, conversation=conversation, on_token=on_token)
-    
-    # --- NEW: Handoff to Grok/Cloud ---
-    # We handoff ONLY if the Soul explicitly asks for it (Local First Policy)
+            ai_out["_local_fallback"] = {
+                "text": ai_out.get("text", ""),
+                "model": original_model,
+                "confidence": original_conf,
+            }
+            ai_out["type"] = "handoff"
+            ai_out["reason"] = "low_confidence"
+            ai_out["escalation_detail"] = escalation_reason
+        else:
+            if ai_out.get("confidence") is not None:
+                print(
+                    f"[Escalation] No escalation: reason={escalation_reason}, "
+                    f"confidence={ai_out.get('confidence')}"
+                )
+
+    # --- Handoff to Grok/Cloud ---
     if ai_out.get("type") == "handoff":
         handoff_reason = ai_out.get("reason", "")
         direct_handoff = handoff_reason in {"explicit_grok_request", "forced_cloud_mode"}
@@ -339,11 +629,11 @@ async def on_event(event_data, on_token=None):
             if not user_query or len(user_query) < 3:
                 user_query = user_text_original
 
-            # Simplified summary for fast path - include recent conversation when available
+            # Simplified summary for fast path - include recent conversation (compressed)
             convo_context = ""
             try:
                 if conversation and not conversation.is_empty():
-                    convo_context = conversation.get_formatted_history()
+                    convo_context = conversation.get_compressed_history()
             except Exception:
                 convo_context = ""
 
@@ -363,9 +653,31 @@ async def on_event(event_data, on_token=None):
             situational_summary = build_situational_summary(summary_packet, briefing)
             print(f"[NervousSystem] Handoff to Grok. Local Summary:\n{situational_summary}")
 
-        # Use valid current personality
-        system_prompt = build_core_identity_prompt(current_personality, include_examples=False)
+        # Generate privacy-safe behavioral hint from memory
+        behavioral_hint = ""
+        try:
+            from ai.context_builder import build_privacy_safe_context
+            behavioral_hint = await build_privacy_safe_context(
+                summary_packet=summary_packet,
+                conversation=conversation,
+                user_message=user_text_original
+            )
+        except Exception as e:
+            print(f"[Privacy] Could not generate behavioral hint: {e}")
+
+        # Use minimal personality prompt for cloud (strips verbose boilerplate)
+        system_prompt = build_core_identity_prompt(
+            current_personality, include_examples=False, minimal=True
+        )
         messages = [{"role": "system", "content": system_prompt}]
+
+        # Inject behavioral hint from privacy filter
+        if behavioral_hint:
+            messages.append({
+                "role": "system",
+                "content": f"Behavioral context (from prior interactions): {behavioral_hint}"
+            })
+
         if direct_handoff:
             messages.append({
                 "role": "system",
@@ -381,81 +693,157 @@ async def on_event(event_data, on_token=None):
 
         cloud_provider = CLOUD_REASONING_PROVIDER if handoff_reason == "forced_cloud_mode" else "grok"
         cloud_model = CLOUD_REASONING_MODEL if handoff_reason == "forced_cloud_mode" else None
-        try:
-            cloud_response = await cloud_brain.chat_stream(
-                cloud_provider, messages, model=cloud_model, on_token=on_token
+
+        # --- Approval gate (opt-in) ---
+        proceed_with_cloud = True
+        if REQUIRE_CLOUD_APPROVAL and not direct_handoff:
+            from ai.escalation import request_cloud_approval
+            approval_reason = ai_out.get("escalation_detail", handoff_reason)
+            approved, approval_detail = await request_cloud_approval(
+                user_text_original, cloud_provider, approval_reason,
+                api_url=ARCHITECT_API_URL, timeout_s=APPROVAL_TIMEOUT_S
             )
-            print(f"[Cloud:{cloud_provider}] Response: {cloud_response[:120]}...")
-            # Convert Grok response into a suggestion format for the router
-            ai_out = {
-                "model": cloud_model or cloud_provider,
-                "type": "suggestion",
-                "text": cloud_response,
-                "confidence": 1.0,
-                "report": summary_packet # Pass the deterministic packet along
-            }
-        except Exception as e:
-            print(f"[Cloud] Failed to reach cloud provider: {e}. Falling back to local suggestion.")
+            if not approved:
+                proceed_with_cloud = False
+                approval_messages = {
+                    "kenyan_babe": f"Cloud request haikupitishwa ({approval_detail}). Nitajibu locally.",
+                    "sage": f"Cloud call wasn't approved ({approval_detail}). I'll answer locally, babes.",
+                    "martin": f"Cloud request not approved ({approval_detail}). Using local response.",
+                }
+                fallback_notice = approval_messages.get(
+                    current_personality,
+                    f"Cloud request not approved ({approval_detail}). Using local response."
+                )
 
-            # If cloud-only mode is enabled but cloud failed, gracefully fall back
-            # to local reasoning instead of repeating API-key errors to the user.
-            local_fallback_done = False
-            if handoff_reason == "forced_cloud_mode":
-                try:
-                    print("[Cloud] Forced cloud mode failed; retrying this turn with local reasoning.")
-                    local_meta = {"reason": event_type, "cloud_fallback": True}
+                local_fallback_text = ai_out.get("_local_fallback", {}).get("text", "")
+                if local_fallback_text:
+                    ai_out = {
+                        "type": "suggestion",
+                        "text": f"{fallback_notice}\n\n{local_fallback_text}",
+                        "model": ai_out.get("_local_fallback", {}).get("model", "local"),
+                        "confidence": ai_out.get("_local_fallback", {}).get("confidence", 0.5),
+                        "approval_status": approval_detail,
+                        "report": summary_packet,
+                    }
+                else:
+                    local_meta = {"reason": event_type, "cloud_approval_denied": True}
                     ai_out = await advise(context, local_meta, conversation=conversation, on_token=on_token)
-                    if ai_out and ai_out.get("type") and ai_out.get("type") != "handoff":
-                        print("[Cloud] Local fallback succeeded.")
-                        local_fallback_done = True
-                except Exception as local_e:
-                    print(f"[Cloud] Local fallback failed: {local_e}")
+                    if ai_out.get("text"):
+                        ai_out["text"] = f"{fallback_notice}\n\n{ai_out['text']}"
+                    ai_out["approval_status"] = approval_detail
 
-            if not local_fallback_done:
-                # Personality-aware cloud error messages
-                cloud_error_messages = {
+        if proceed_with_cloud:
+            try:
+                cloud_response = await cloud_brain.chat_stream(
+                    cloud_provider, messages, model=cloud_model, on_token=on_token
+                )
+                print(f"[Cloud:{cloud_provider}] Response: {cloud_response[:120]}...")
+                # Convert Grok response into a suggestion format for the router
+                ai_out = {
+                    "model": cloud_model or cloud_provider,
+                    "type": "suggestion",
+                    "text": cloud_response,
+                    "confidence": 1.0,
+                    "report": summary_packet # Pass the deterministic packet along
+                }
+            except Exception as e:
+                error_str = str(e)
+                is_timeout = "timeout" in error_str.lower() or "timed out" in error_str.lower()
+                print(f"[Cloud] Failed to reach cloud provider: {e}. Falling back to local suggestion.")
+
+                # Provide explicit user feedback before fallback
+                timeout_feedback = {
                     "kenyan_babe": (
-                        f"Mahn... nilitry ku-reach {cloud_provider} cloud lakini key iko missing ama invalid. "
-                        "Weka OPENAI_API_KEY ama XAI_API_KEY kwa env, au uzime cloud-only mode."
+                        "Cloud iko slow kidogo... wacha nicheki locally."
+                        if is_timeout else
+                        "Cloud haiku-respond... wacha nitumie local model."
                     ),
                     "sage": (
-                        f"Tried to reach {cloud_provider} cloud, babes, but the API key is missing or invalid. "
-                        "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
+                        "Taking longer than usual from cloud... checking locally, babes."
+                        if is_timeout else
+                        "Cloud isn't responding... let me handle this locally."
                     ),
                     "martin": (
-                        f"Cloud call failed for {cloud_provider}. Missing/invalid API key. "
-                        "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
-                    )
+                        "Cloud call timed out. Routing locally."
+                        if is_timeout else
+                        "Cloud unavailable. Falling back to local."
+                    ),
                 }
-                error_text = cloud_error_messages.get(current_personality,
-                    (
-                        f"I tried to reach {cloud_provider} cloud, but the API key is missing or invalid. "
-                        "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
-                    ))
+                fallback_notice = timeout_feedback.get(
+                    current_personality,
+                    "Taking longer than usual, checking locally..."
+                    if is_timeout else "Cloud unavailable, checking locally..."
+                )
 
-                ai_out = {
-                    "type": "suggestion",
-                    "text": error_text,
-                    "model": "error_fallback"
-                }
+                if on_token:
+                    try:
+                        await on_token(fallback_notice + " ")
+                    except Exception:
+                        pass
+
+                # If cloud-only mode is enabled but cloud failed, gracefully fall back
+                # to local reasoning instead of repeating API-key errors to the user.
+                local_fallback_done = False
+                if handoff_reason == "forced_cloud_mode":
+                    try:
+                        print("[Cloud] Forced cloud mode failed; retrying this turn with local reasoning.")
+                        local_meta = {"reason": event_type, "cloud_fallback": True}
+                        ai_out = await advise(context, local_meta, conversation=conversation, on_token=on_token)
+                        if ai_out and ai_out.get("type") and ai_out.get("type") != "handoff":
+                            if ai_out.get("text"):
+                                ai_out["text"] = f"{fallback_notice}\n\n{ai_out['text']}"
+                            ai_out["cloud_fallback"] = True
+                            print("[Cloud] Local fallback succeeded.")
+                            local_fallback_done = True
+                    except Exception as local_e:
+                        print(f"[Cloud] Local fallback failed: {local_e}")
+
+                if not local_fallback_done:
+                    # Personality-aware cloud error messages
+                    cloud_error_messages = {
+                        "kenyan_babe": (
+                            f"Mahn... nilitry ku-reach {cloud_provider} cloud lakini key iko missing ama invalid. "
+                            "Weka OPENAI_API_KEY ama XAI_API_KEY kwa env, au uzime cloud-only mode."
+                        ),
+                        "sage": (
+                            f"Tried to reach {cloud_provider} cloud, babes, but the API key is missing or invalid. "
+                            "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
+                        ),
+                        "martin": (
+                            f"Cloud call failed for {cloud_provider}. Missing/invalid API key. "
+                            "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
+                        )
+                    }
+                    error_text = cloud_error_messages.get(current_personality,
+                        (
+                            f"I tried to reach {cloud_provider} cloud, but the API key is missing or invalid. "
+                            "Set OPENAI_API_KEY or XAI_API_KEY, or disable cloud-only mode."
+                        ))
+
+                    ai_out = {
+                        "type": "suggestion",
+                        "text": error_text,
+                        "model": "error_fallback"
+                    }
     
     # Route the AI output
-    route_result = normalize_router_result(
-        await route(ai_out, evt=event_data, context=context, sage_instance=sage)
-    )
-    if route_result and route_result.get("suppressed"):
-        suppressed_payload = {
-            "type": "none",
-            "suppressed": True,
-            "reason": route_result.get("reason"),
-        }
-        if event_source == "voice_pipeline":
-            return normalize_voice_response(
-                suppressed_payload,
-                default_intent=event_data.get("intent", event_type),
-                default_route="LOCAL",
-            )
-        return suppressed_payload
+    if not skip_router:
+        route_result = normalize_router_result(
+            await route(ai_out, evt=event_data, context=context, sage_instance=sage)
+        )
+        if route_result and route_result.get("suppressed"):
+            suppressed_payload = {
+                "type": "none",
+                "suppressed": True,
+                "reason": route_result.get("reason"),
+            }
+            if event_source == "voice_pipeline":
+                return normalize_voice_response(
+                    suppressed_payload,
+                    default_intent=event_data.get("intent", event_type),
+                    default_route="LOCAL",
+                )
+            return suppressed_payload
     
     # Record response in conversation history and action memory
     response_text = ai_out.get("text", "")
@@ -502,8 +890,9 @@ async def handle_voice_transcript(transcript: str, client):
     """
     start_time = time.time()
 
-    # Clear any pending TTS to avoid old responses mixing with new ones
-    client.publish("sage/tts/clear", json.dumps({"reason": "new_request"}))
+    # Clear any pending TTS only when voice output is enabled.
+    if VOICE_OUTPUT_ENABLED:
+        client.publish("sage/tts/clear", json.dumps({"reason": "new_request"}))
 
     # Get conversation history for context
     t0 = time.time()
@@ -527,7 +916,7 @@ async def handle_voice_transcript(transcript: str, client):
     # Define Streaming Callback
     # We use a mutable list to track state across callbacks
     streaming_state = {"active": True, "window": "", "token_count": 0, "killed_reason": None}
-    tts_streamer = TTSStreamer(client) if STREAM_TTS else None
+    tts_streamer = TTSStreamer(client) if (STREAM_TTS and VOICE_OUTPUT_ENABLED) else None
     print(f"[Stream] STREAM_TTS={STREAM_TTS}, tts_streamer={'yes' if tts_streamer else 'no'}")
 
     async def stream_callback(token):
@@ -584,7 +973,7 @@ async def handle_voice_transcript(transcript: str, client):
         client.publish("sage/voice/streaming", json.dumps({"text": token}))
 
         # True streaming mode: feed chunks directly to TTS sentence buffer.
-        if tts_streamer is not None:
+        if tts_streamer is not None and VOICE_OUTPUT_ENABLED:
             await tts_streamer.feed(token)
 
     t3 = time.time()
@@ -666,7 +1055,8 @@ async def handle_voice_transcript(transcript: str, client):
             "text": response_text,
             "type": result.get("type", ""),
             "status": result.get("status", ""),
-            "source": "handle_voice_transcript"  # Debug: track publish source
+            "source": "handle_voice_transcript",  # Debug: track publish source
+            "no_tts": not VOICE_OUTPUT_ENABLED,
         })
         print(f"[Voice] Publishing response from handle_voice_transcript: {response_text[:50]}...")
         t_publish = time.time()
@@ -714,10 +1104,63 @@ async def handle_chat_request(payload: dict, client):
         conversation = _get_chat_conversation(conversation_id, max_turns=max_turns)
         conversation.max_turns = max_turns
 
-        conversation.add_user_message(user_text, {"source": "chat_api", "request_id": request_id})
+        # Text intent routing: classify the incoming chat message and dispatch
+        # architect/agent intents before falling back to the brain advisor.
+        conversation_context = conversation.get_intent_context()
+        forced_intent_type, forced_query = parse_text_intent_command(user_text)
+        if not forced_intent_type and looks_like_architect_text_request(user_text):
+            forced_intent_type = "architect_task"
+            forced_query = user_text
+        intent: Optional[Intent] = None
+
+        try:
+            if forced_intent_type:
+                hinted = classify_intent(
+                    forced_query or user_text,
+                    conversation_context=conversation_context
+                )
+                intent = Intent(
+                    type=forced_intent_type,
+                    project=hinted.project,
+                    query=(forced_query or hinted.query or user_text).strip(),
+                    original=user_text,
+                    confidence=1.0,
+                    method="text_command",
+                    signals={**hinted.signals, "forced_text_command": True},
+                )
+            else:
+                intent = classify_intent(user_text, conversation_context=conversation_context)
+        except Exception as e:
+            print(f"[Chat] Intent classification failed: {e}")
+            intent = Intent(
+                type="brain_query",
+                project=None,
+                query=user_text,
+                original=user_text,
+                confidence=0.0,
+                method="fallback",
+                signals={"intent_error": str(e)},
+            )
+
+        conversation.update_mode(user_text, intent.type)
+        conversation.add_user_message(
+            user_text,
+            {
+                "source": "chat_api",
+                "request_id": request_id,
+                "intent": intent.type,
+                "intent_method": intent.method,
+                "intent_confidence": intent.confidence,
+            },
+        )
+
+        print(
+            f"[Chat] Intent: type={intent.type}, project={intent.project}, "
+            f"method={intent.method}, confidence={intent.confidence:.2f}"
+        )
 
         context = {
-            "trigger": {"type": "chat_request", "text": user_text},
+            "trigger": {"type": "chat_request", "text": intent.query or user_text},
             "local_hour": datetime.now().hour,
             "day_of_week": datetime.now().weekday(),
             "state": sage.get_snapshot(),
@@ -728,14 +1171,292 @@ async def handle_chat_request(payload: dict, client):
         if payload.get("system_prompt"):
             context["chat_system_prompt"] = payload.get("system_prompt")
 
-        reason = str(payload.get("reason", "chat_request"))
-        chat_meta = {
-            "reason": reason,
-            "minimal_prompt": bool(payload.get("minimal_prompt", True)),
-            "allow_plain_text": bool(payload.get("allow_plain_text", True)),
-        }
-        ai_out = await advise(context, chat_meta, conversation=conversation)
-        response_text = (ai_out.get("text", "") or "").strip()
+        async def _publish_chat_delta(token: str):
+            if not token:
+                return
+            client.publish(
+                response_topic,
+                json.dumps(
+                    {
+                        "request_id": request_id,
+                        "conversation_id": conversation_id,
+                        "success": True,
+                        "type": "delta",
+                        "delta": token,
+                        "ts": int(time.time() * 1000),
+                    }
+                ),
+            )
+
+        stream = bool(payload.get("stream", False))
+        ai_out: Dict = {}
+        response_text = ""
+
+        project_git_result = handle_project_git_text(
+            user_text=user_text,
+            conversation_id=conversation_id,
+            request_id=request_id,
+        )
+        if project_git_result.get("handled"):
+            response_text = _extract_human_text(
+                str(project_git_result.get("response_text") or "")
+            )
+            ai_out = {
+                "type": "error" if project_git_result.get("error") else "suggestion",
+                "intent": "project_git",
+                "model": "project_git",
+                "action": project_git_result.get("action"),
+            }
+        else:
+            google_tool_result = handle_google_workspace_text(
+                user_text=user_text,
+                api_base_url=ARCHITECT_API_URL,
+                conversation_id=conversation_id,
+                request_id=request_id,
+            )
+            if google_tool_result.get("handled"):
+                response_text = _extract_human_text(
+                    str(google_tool_result.get("response_text") or "")
+                )
+                ai_out = {
+                    "type": "error" if google_tool_result.get("error") else "suggestion",
+                    "intent": "google_workspace",
+                    "model": google_tool_result.get("model", "google_workspace"),
+                    "action": google_tool_result.get("action"),
+                    "latency_ms": google_tool_result.get("latency_ms"),
+                }
+            elif intent.type == "architect_task":
+                if not architect_bridge:
+                    ai_out = {"type": "error", "intent": "architect_task", "model": "architect_bridge"}
+                    response_text = "Architect service is not available."
+                else:
+                    cli_override = _resolve_cli_override(intent.type, intent.query or user_text)
+                    lowered_original = user_text.lower()
+                    lowered_query = (intent.query or "").lower()
+                    build_prefix = lowered_original.startswith("/architect-build")
+                    explicit_execute = build_prefix
+                    explicit_execute = explicit_execute or any(
+                        marker in lowered_query
+                        for marker in (
+                            "build now",
+                            "run build",
+                            "apply changes",
+                            "execute changes",
+                            "implement now",
+                            "make the changes",
+                            "ship it",
+                        )
+                    )
+                    if lowered_query.startswith(("build ", "execute ", "apply ")):
+                        explicit_execute = True
+
+                    apply_to_repo = lowered_original.startswith("/architect-build")
+                    apply_to_repo = apply_to_repo or any(
+                        marker in lowered_query
+                        for marker in (
+                            "apply to repo",
+                            "write to repo",
+                            "real file edits",
+                            "edit real files",
+                        )
+                    )
+
+                    if build_prefix and not (intent.query or "").strip():
+                        ai_out = {
+                            "type": "error",
+                            "intent": "architect_task",
+                            "status": "INVALID_REQUEST",
+                            "model": "architect_bridge",
+                            "artifacts": [],
+                        }
+                        response_text = (
+                            "Missing build task. Use '/architect-build <what to change>'. "
+                            "Example: /architect-build update apps/sage-mobile/README.md with a short note."
+                        )
+                        conversation.add_assistant_message(
+                            response_text,
+                            {
+                                "source": "chat_api",
+                                "request_id": request_id,
+                                "type": ai_out.get("type"),
+                                "model": ai_out.get("model"),
+                                "intent": intent.type,
+                            },
+                        )
+                        client.publish(
+                            response_topic,
+                            json.dumps(
+                                {
+                                    "request_id": request_id,
+                                    "conversation_id": conversation_id,
+                                    "success": True,
+                                    "text": response_text,
+                                    "type": ai_out.get("type", "error"),
+                                    "intent": intent.type,
+                                    "done": True,
+                                    "model": ai_out.get("model", "brain_runtime"),
+                                    "personality": current_personality,
+                                    "ts": int(time.time() * 1000),
+                                }
+                            ),
+                        )
+                        return
+
+                    # Text chat defaults to plan mode. "/architect-build" always executes
+                    # plan+build even when wording would otherwise classify as plan.
+                    if build_prefix:
+                        task_type = "code"
+                    elif explicit_execute:
+                        task_type = get_task_type_from_intent(intent)
+                    else:
+                        task_type = "plan"
+                    result = await architect_bridge.dispatch(
+                        project_id=intent.project,
+                        query=intent.query,
+                        task_type=task_type,
+                        routing_hint=None,
+                        llm_override=cli_override,
+                    )
+                    result = result if isinstance(result, dict) else {}
+                    status = str(result.get("status", "UNKNOWN")).upper()
+                    summary = str(result.get("summary", "") or "").strip()
+                    artifacts = result.get("artifacts", []) or []
+
+                    if status == "SUCCESS":
+                        if summary:
+                            response_text = summary
+                        elif artifacts:
+                            artifact_preview = ", ".join(str(path) for path in artifacts[:3])
+                            response_text = f"Architect task completed. Artifacts: {artifact_preview}"
+                        else:
+                            response_text = "Architect task completed."
+
+                        if explicit_execute and apply_to_repo:
+                            apply_result = _apply_architect_artifacts_to_repo(
+                                architect_bridge=architect_bridge,
+                                project_hint=intent.project,
+                                artifacts=artifacts,
+                            )
+                            copied = apply_result.get("copied_count", 0)
+                            skipped = apply_result.get("skipped_count", 0)
+                            if copied > 0:
+                                preview = ", ".join(apply_result.get("copied", [])[:3])
+                                response_text = (
+                                    f"{response_text}\n\n"
+                                    f"Applied {copied} file(s) to repo ({preview})."
+                                    + (f" Skipped {skipped}." if skipped else "")
+                                )
+                            else:
+                                response_text = (
+                                    f"{response_text}\n\n"
+                                    "Build ran, but no files were applied to repo. "
+                                    "Check manifest paths/artifacts."
+                                )
+                        if task_type == "plan":
+                            response_text = (
+                                f"{response_text}\n\n"
+                                "Say '/architect-build ...' (or include 'build now') when you want me to execute changes."
+                            )
+                        ai_out = {
+                            "type": "acknowledged",
+                            "intent": "architect_task",
+                            "status": status,
+                            "model": "architect_bridge",
+                            "artifacts": artifacts,
+                        }
+                    else:
+                        response_text = summary or "Architect task failed."
+                        if explicit_execute and apply_to_repo and artifacts:
+                            apply_result = _apply_architect_artifacts_to_repo(
+                                architect_bridge=architect_bridge,
+                                project_hint=intent.project,
+                                artifacts=artifacts,
+                            )
+                            copied = apply_result.get("copied_count", 0)
+                            skipped = apply_result.get("skipped_count", 0)
+                            response_text = (
+                                f"{response_text}\n\n"
+                                f"Warning: build reported failure, but applied {copied} file(s) to repo"
+                                + (f" and skipped {skipped}." if skipped else ".")
+                            )
+                        ai_out = {
+                            "type": "error",
+                            "intent": "architect_task",
+                            "status": status,
+                            "model": "architect_bridge",
+                            "artifacts": artifacts,
+                        }
+            elif intent.type == "agent_task":
+                if not agent_bridge:
+                    ai_out = {"type": "error", "intent": "agent_task", "model": "agent_bridge"}
+                    response_text = "Agent system is not available."
+                else:
+                    result = await agent_bridge.dispatch(intent.query)
+                    result = result if isinstance(result, dict) else {}
+                    ai_out = {**result, "intent": "agent_task", "model": "agent_bridge"}
+                    response_text = _extract_human_text(result.get("text", "") or "")
+            else:
+                if intent.type == "smalltalk":
+                    reason = "smalltalk"
+                elif intent.type == "home_control":
+                    reason = "home_control"
+                else:
+                    reason = str(payload.get("reason", "chat_request"))
+
+                chat_meta = {
+                    "reason": reason,
+                    "minimal_prompt": bool(payload.get("minimal_prompt", CHAT_MINIMAL_PROMPT_DEFAULT)),
+                    "allow_plain_text": bool(payload.get("allow_plain_text", True)),
+                    "intent_type": intent.type,
+                }
+                if intent.type == "home_control":
+                    smartthings_result = await handle_home_control_request(intent.query or user_text)
+                    if smartthings_result.get("handled"):
+                        ai_out = {
+                            "type": "suggestion",
+                            "intent": intent.type,
+                            "model": "smartthings",
+                        }
+                        response_text = smartthings_result.get("text", "Done.")
+                        chat_meta = None
+
+                cli_override = _resolve_cli_override(intent.type, intent.query or user_text)
+                use_cli = bool(
+                    cli_override
+                    and (
+                        intent.type in {"agent_task", "architect_task"}
+                        or _looks_like_research_text(intent.query or user_text)
+                    )
+                )
+
+                if chat_meta is None:
+                    pass
+                elif use_cli:
+                    prompt_messages = []
+                    system_prompt = context.get("chat_system_prompt")
+                    if isinstance(system_prompt, str) and system_prompt.strip():
+                        prompt_messages.append({"role": "system", "content": system_prompt.strip()})
+                    prompt_messages.append({"role": "user", "content": intent.query or user_text})
+                    cli_text = await _chat_with_external_cli(
+                        prompt_messages,
+                        provider=cli_override["provider"],
+                        model=cli_override.get("model"),
+                    )
+                    response_text = _extract_human_text(cli_text)
+                    ai_out = {
+                        "type": "suggestion",
+                        "intent": intent.type,
+                        "model": f"{cli_override['provider']}:{cli_override.get('model')}",
+                    }
+                else:
+                    ai_out = await advise(
+                        context,
+                        chat_meta,
+                        conversation=conversation,
+                        on_token=_publish_chat_delta if stream else None,
+                        stream=stream,
+                    )
+                    response_text = _extract_human_text(ai_out.get("text", "") or "")
 
         if not response_text:
             response_text = "I heard you, but I could not generate a response."
@@ -747,6 +1468,7 @@ async def handle_chat_request(payload: dict, client):
                 "request_id": request_id,
                 "type": ai_out.get("type"),
                 "model": ai_out.get("model"),
+                "intent": intent.type,
             },
         )
 
@@ -759,6 +1481,8 @@ async def handle_chat_request(payload: dict, client):
                     "success": True,
                     "text": response_text,
                     "type": ai_out.get("type", "suggestion"),
+                    "intent": intent.type,
+                    "done": True,
                     "model": ai_out.get("model", "brain_runtime"),
                     "personality": current_personality,
                     "ts": int(time.time() * 1000),
@@ -780,13 +1504,13 @@ async def handle_chat_request(payload: dict, client):
 
 
 def on_message(client, userdata, msg):
-    global current_personality
+    global current_personality, current_raw_mode, VOICE_INPUT_ENABLED, VOICE_OUTPUT_ENABLED
     try:
         topic = msg.topic
         payload_str = msg.payload.decode()
         
         # Brain Config Handler
-        if topic == "sage/brain/config":
+        if topic == BRAIN_CONFIG_TOPIC:
             try:
                 config = json.loads(payload_str)
                 new_personality = config.get("personality")
@@ -795,9 +1519,16 @@ def on_message(client, userdata, msg):
                         from ai.advisor import set_raw_mode
                         enabled = bool(config.get("raw_mode"))
                         set_raw_mode(enabled)
+                        current_raw_mode = enabled
                         print(f"[Brain] Raw mode set to: {enabled}")
                     except Exception as e:
                         print(f"[Brain] Could not set raw mode: {e}")
+                if "voice_input_enabled" in config:
+                    VOICE_INPUT_ENABLED = bool(config.get("voice_input_enabled"))
+                    print(f"[Brain] Voice input enabled: {VOICE_INPUT_ENABLED}")
+                if "voice_output_enabled" in config:
+                    VOICE_OUTPUT_ENABLED = bool(config.get("voice_output_enabled"))
+                    print(f"[Brain] Voice output enabled: {VOICE_OUTPUT_ENABLED}")
 
                 if new_personality:
                     if new_personality != current_personality:
@@ -812,19 +1543,22 @@ def on_message(client, userdata, msg):
                     # Broadcast confirmation so UI updates (avoid echo loops)
                     if config.get("source") != "brain":
                         client.publish(
-                            "sage/brain/config",
+                            BRAIN_CONFIG_TOPIC,
                             json.dumps({
                                 "personality": current_personality,
-                                "raw_mode": config.get("raw_mode"),
+                                "raw_mode": current_raw_mode,
+                                "voice_input_enabled": VOICE_INPUT_ENABLED,
+                                "voice_output_enabled": VOICE_OUTPUT_ENABLED,
                                 "source": "brain"
                             })
                         )
+                _publish_brain_status(client, status="ready")
             except Exception as e:
                 print(f"[Brain] Config update failed: {e}")
             return
         
         # Brain Command Handler (clear conversation, clear memory, etc.)
-        if topic == "sage/brain/command":
+        if topic == BRAIN_COMMAND_TOPIC:
             try:
                 cmd_data = json.loads(payload_str)
                 command = cmd_data.get("command", "")
@@ -854,6 +1588,15 @@ def on_message(client, userdata, msg):
                         print("[Brain] Episodes cleared")
                     except ImportError:
                         print("[Brain] Memory module not available")
+                elif command == "kill_switch":
+                    VOICE_INPUT_ENABLED = False
+                    VOICE_OUTPUT_ENABLED = False
+                    print("[Brain] Kill switch enabled: voice input/output disabled")
+                elif command == "resume_voice":
+                    VOICE_INPUT_ENABLED = True
+                    VOICE_OUTPUT_ENABLED = True
+                    print("[Brain] Voice input/output resumed")
+                _publish_brain_status(client, status="ready", last_command=command)
                         
             except Exception as e:
                 print(f"[Brain] Command failed: {e}")
@@ -861,6 +1604,9 @@ def on_message(client, userdata, msg):
 
         # Voice transcript handler
         if topic == "sage/voice/transcript":
+            if not VOICE_INPUT_ENABLED:
+                print("[Voice] Input disabled; ignoring transcript")
+                return
             print(f"[MQTT] Voice transcript received: '{payload_str[:50]}...'")
             asyncio.run_coroutine_threadsafe(
                 handle_voice_transcript(payload_str, client),
@@ -905,6 +1651,44 @@ def on_message(client, userdata, msg):
                 pass
             return
 
+        # Vision summaries + metrics are context inputs for routing/memory.
+        if topic.startswith("sage/vision/") and topic.endswith("/vlm"):
+            try:
+                data = json.loads(payload_str) if payload_str else {}
+            except Exception:
+                data = {}
+            location = topic.split("/")[2] if len(topic.split("/")) > 2 else "unknown"
+            event = {
+                "type": "vision_vlm",
+                "room": location,
+                "source": "vision",
+                "activity": data.get("activity"),
+                "mood": data.get("mood"),
+                "text": data.get("description", ""),
+                "latency_ms": data.get("latency_ms"),
+                "queue_wait_ms": data.get("queue_wait_ms"),
+                "provider": data.get("provider"),
+                "model": data.get("model"),
+                "ts": int(time.time() * 1000),
+            }
+            buffer.push(event)
+            print(
+                f"[Vision] {location}: {str(event.get('activity') or 'unknown')} / "
+                f"{str(event.get('mood') or 'unknown')} ({event.get('provider')})"
+            )
+            return
+
+        if topic.startswith("sage/vision/") and topic.endswith("/metrics"):
+            try:
+                data = json.loads(payload_str) if payload_str else {}
+                provider = data.get("provider", "unknown")
+                total_ms = data.get("total_ms")
+                queue_ms = data.get("queue_wait_ms")
+                print(f"[VisionMetrics] provider={provider} queue={queue_ms} total={total_ms}")
+            except Exception:
+                pass
+            return
+
         # 1. Parse raw message (presence sensors)
         raw_event = parse_presence(topic, payload_str)
         if not raw_event:
@@ -930,27 +1714,17 @@ async def main_loop():
 
     print("🧠 Sage Nervous System starting...")
     client = mqtt.Client()
+    client.on_connect = _on_mqtt_connect
+    client.on_disconnect = _on_mqtt_disconnect
     client.on_message = on_message
 
     try:
+        client.reconnect_delay_set(min_delay=1, max_delay=30)
         client.connect(MQTT_HOST, MQTT_PORT, 60)
-        client.publish("sage/brain/status", json.dumps({"status": "starting"}))
+        _publish_brain_status(client, status="starting")
 
-        # Subscribe to topics
-        client.subscribe("sage/sensors/+/presence")  # Canonical presence sensors
-        client.subscribe("sage/presence/+")          # Compatibility presence topic
-        client.subscribe("sage/voice/transcript")     # Voice commands from STT
-        client.subscribe(CHAT_REQUEST_TOPIC)          # Text chat RPC for API/mobile
-        client.subscribe("sage/brain/config")         # Brain configuration
-        client.subscribe("sage/brain/command")        # Brain commands (clear memory, etc.)
-        client.subscribe("sage/agent/+/needs_approval")  # Agent approval requests
-        client.subscribe("sage/agent/+/status")          # Agent status updates
-        client.subscribe("sage/agent/+/command")         # Agent commands
-
-        print(
-            "[MQTT] Subscribed to: sage/sensors/+/presence, sage/presence/+, "
-            f"sage/voice/transcript, {CHAT_REQUEST_TOPIC}, sage/brain/config, sage/agent/+/*"
-        )
+        # Subscribe immediately on first boot; _on_mqtt_connect re-subscribes after reconnects.
+        _subscribe_all_topics(client)
         client.loop_start()
 
         # Preload memory system to avoid first-message latency.
@@ -993,7 +1767,7 @@ async def main_loop():
         print("[Brain] ✓ Agent system initialized")
 
         # Announce readiness
-        client.publish("sage/brain/status", json.dumps({"status": "ready"}))
+        _publish_brain_status(client, status="ready")
         print("[Brain] System Ready. Pulse normal.")
         
         while True:

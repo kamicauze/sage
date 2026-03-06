@@ -36,6 +36,13 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_API_KEY=...
 XAI_API_KEY=...
+
+# Google Workspace OAuth (Calendar + Tasks + Drive read)
+SAGE_GOOGLE_CLIENT_ID=your-google-oauth-client-id
+SAGE_GOOGLE_CLIENT_SECRET=your-google-oauth-client-secret
+SAGE_GOOGLE_REDIRECT_URI=https://your-node-name.your-tailnet.ts.net/google/auth/callback
+# Optional token store path override
+# SAGE_GOOGLE_OAUTH_STORE_PATH=.sage_memory/google/oauth_tokens.json
 ```
 
 ### 3. Start the Server
@@ -53,6 +60,22 @@ The API will be available at:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 - WebSocket: `ws://localhost:8000/ws/{client_id}`
+
+### Google OAuth Endpoints (Calendar + Tasks + Drive)
+
+- `GET /google/auth/url` -> returns connect URL
+- `GET /google/auth/callback` -> OAuth callback handler
+- `GET /google/status` -> configured/connected status
+- `POST /google/disconnect` -> remove stored tokens
+- `GET /google/calendar/events` -> list primary calendar events
+- `POST /google/calendar/events` -> create primary calendar event
+- `GET /google/tasks/lists` -> list task lists
+- `GET /google/tasks/list/{tasklist_id}` -> list tasks in list
+- `POST /google/tasks/list/{tasklist_id}` -> create task in list
+- `GET /google/drive/search?q=...` -> search Drive files
+- `GET /google/drive/files/{file_id}` -> fetch Drive file metadata
+- `GET /google/drive/files/{file_id}/content` -> fetch textual Drive/Docs content when supported
+- `POST /google/drive/link-project` -> attach a Drive file to a project by URL or file ID
 
 ## API Endpoints
 
@@ -274,11 +297,27 @@ For `provider=brain`, make sure:
 - MQTT broker is reachable at `MQTT_HOST:MQTT_PORT`
 - Brain runtime is running and subscribed to chat request topic
 
+#### `POST /chat/stream`
+Server-Sent Events stream for chat responses.
+
+Notes:
+- `provider=brain`: emits status + final response (no token-level stream yet)
+- `provider=ollama`: emits token deltas as they arrive
+
+#### `GET /chat/health`
+Returns chat bridge status, MQTT availability, and streaming capability flags.
+
 #### `GET /chat/{conversation_id}`
 Fetch stored messages for a conversation.
 
 #### `DELETE /chat/{conversation_id}`
 Delete a conversation and all stored messages.
+
+#### Chat Persistence (Testing)
+Every successful chat exchange is appended to a local JSONL audit log:
+- Default path: `.sage_memory/chat_logs/chat_history.jsonl`
+- Enable/disable: `SAGE_CHAT_LOG_ENABLED=true|false`
+- Override path: `SAGE_CHAT_LOG_PATH=/absolute/or/relative/path.jsonl`
 
 ### WebSocket
 

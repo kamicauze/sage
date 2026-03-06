@@ -6,6 +6,9 @@ Tools are callable actions an agent can invoke during its think→act→observe 
 from dataclasses import dataclass, field
 from typing import Callable, Awaitable, Any, Dict
 
+from .policy import AgentToolPolicy
+from .sandbox import ToolSandbox
+
 
 @dataclass
 class Tool:
@@ -130,20 +133,16 @@ def make_architect_build_tool(architect_bridge) -> Tool:
     )
 
 
-def make_run_tests_tool() -> Tool:
+def make_run_tests_tool(
+    sandbox: ToolSandbox = None,
+    policy: AgentToolPolicy = None,
+) -> Tool:
     """Tool that runs a test suite."""
+    policy = policy or AgentToolPolicy.from_env()
+    sandbox = sandbox or ToolSandbox(policy)
 
     async def run_tests(path: str = ".", command: str = "python -m pytest") -> str:
-        import asyncio
-        proc = await asyncio.create_subprocess_shell(
-            f"cd {path} && {command}",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode()[-2000:]  # Last 2000 chars
-        status = "PASSED" if proc.returncode == 0 else "FAILED"
-        return f"{status}\n{output}"
+        return await sandbox.run_command(command=command, cwd=path, max_output_chars=4000, timeout_sec=300)
 
     return Tool(
         name="run_tests",
@@ -156,16 +155,17 @@ def make_run_tests_tool() -> Tool:
     )
 
 
-def make_read_file_tool() -> Tool:
+def make_read_file_tool(
+    sandbox: ToolSandbox = None,
+    policy: AgentToolPolicy = None,
+) -> Tool:
     """Tool that reads a file's contents."""
+    policy = policy or AgentToolPolicy.from_env()
+    sandbox = sandbox or ToolSandbox(policy)
 
     async def read_file(path: str) -> str:
         try:
-            with open(path, "r") as f:
-                content = f.read()
-            if len(content) > 5000:
-                return content[:5000] + f"\n... (truncated, {len(content)} total chars)"
-            return content
+            return sandbox.read_text(path, max_chars=5000)
         except Exception as e:
             return f"Error reading {path}: {e}"
 
@@ -177,16 +177,17 @@ def make_read_file_tool() -> Tool:
     )
 
 
-def make_write_file_tool() -> Tool:
+def make_write_file_tool(
+    sandbox: ToolSandbox = None,
+    policy: AgentToolPolicy = None,
+) -> Tool:
     """Tool that writes content to a file."""
+    policy = policy or AgentToolPolicy.from_env()
+    sandbox = sandbox or ToolSandbox(policy)
 
     async def write_file(path: str, content: str) -> str:
-        import os
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(content)
-            return f"Written {len(content)} chars to {path}"
+            return sandbox.write_text(path, content)
         except Exception as e:
             return f"Error writing {path}: {e}"
 
@@ -238,25 +239,172 @@ def make_web_search_tool() -> Tool:
     )
 
 
-def make_deploy_tool() -> Tool:
+def make_gmail_read_tool(api_base_url: str = "http://localhost:8000") -> Tool:
+    """Tool that searches and reads Gmail messages."""
+
+    async def gmail_read(query: str = "", max_results: int = 5) -> str:
+        import requests as _requests
+        url = f"{api_base_url}/google/gmail/messages"
+        resp = _requests.get(url, params={"q": query, "max_results": max_results}, timeout=10)
+        if not resp.ok:
+            return f"Error listing messages: HTTP {resp.status_code}"
+        messages = resp.json().get("messages", [])
+        if not messages:
+            return "No messages found."
+        # Fetch details for top results
+        summaries = []
+        for msg in messages[:max_results]:
+            msg_id = msg.get("id", "")
+            detail_resp = _requests.get(f"{api_base_url}/google/gmail/messages/{msg_id}", params={"format": "metadata"}, timeout=10)
+            if detail_resp.ok:
+                payload = detail_resp.json().get("message", {})
+                headers = {h["name"]: h["value"] for h in payload.get("payload", {}).get("headers", []) if h.get("name") in ("From", "Subject", "Date")}
+                summaries.append(f"- [{msg_id}] {headers.get('Subject', '(no subject)')} from {headers.get('From', 'unknown')} ({headers.get('Date', '')})")
+            else:
+                summaries.append(f"- [{msg_id}] (could not fetch details)")
+        return "Gmail messages:\n" + "\n".join(summaries)
+
+    return Tool(
+        name="gmail_read",
+        description="Search and read Gmail messages. Returns subject, sender, and date for each match.",
+        fn=gmail_read,
+        parameters={
+            "query": "Gmail search query (same syntax as Gmail search box). Empty = recent inbox.",
+            "max_results": "Number of messages to return (default: 5)",
+        },
+    )
+
+
+def make_gmail_send_tool(api_base_url: str = "http://localhost:8000") -> Tool:
+    """Tool that sends an email via Gmail."""
+
+    async def gmail_send(to: str, subject: str, body: str) -> str:
+        import requests as _requests
+        resp = _requests.post(
+            f"{api_base_url}/google/gmail/send",
+            json={"to": to, "subject": subject, "body": body},
+            timeout=10,
+        )
+        if not resp.ok:
+            return f"Error sending email: HTTP {resp.status_code}"
+        msg_id = resp.json().get("message_id", "unknown")
+        return f"Email sent to {to} (message id: {msg_id})"
+
+    return Tool(
+        name="gmail_send",
+        description="Send an email via Gmail. Requires approval before sending.",
+        fn=gmail_send,
+        needs_approval=True,
+        parameters={
+            "to": "Recipient email address",
+            "subject": "Email subject line",
+            "body": "Email body text",
+        },
+    )
+
+
+def make_gmail_archive_tool(api_base_url: str = "http://localhost:8000") -> Tool:
+    """Tool that archives a Gmail message (removes INBOX label)."""
+
+    async def gmail_archive(message_id: str) -> str:
+        import requests as _requests
+        resp = _requests.post(
+            f"{api_base_url}/google/gmail/messages/{message_id}/modify",
+            json={"remove_labels": ["INBOX"]},
+            timeout=10,
+        )
+        if not resp.ok:
+            return f"Error archiving message: HTTP {resp.status_code}"
+        return f"Message {message_id} archived."
+
+    return Tool(
+        name="gmail_archive",
+        description="Archive a Gmail message by removing it from the inbox. Requires approval.",
+        fn=gmail_archive,
+        needs_approval=True,
+        parameters={"message_id": "The Gmail message ID to archive"},
+    )
+
+
+def make_browser_navigate_tool(session) -> Tool:
+    """Tool that navigates to a URL in a browser session."""
+
+    async def navigate(url: str) -> str:
+        return await session.navigate(url)
+
+    return Tool(
+        name="browser_navigate",
+        description="Navigate to a URL in a headless browser. Returns page title and status.",
+        fn=navigate,
+        needs_approval=True,
+        parameters={"url": "The URL to navigate to"},
+    )
+
+
+def make_browser_click_tool(session) -> Tool:
+    """Tool that clicks an element in the browser."""
+
+    async def click(selector: str) -> str:
+        return await session.click(selector)
+
+    return Tool(
+        name="browser_click",
+        description="Click an element matching a CSS selector in the browser.",
+        fn=click,
+        needs_approval=True,
+        parameters={"selector": "CSS selector of the element to click"},
+    )
+
+
+def make_browser_extract_tool(session) -> Tool:
+    """Tool that extracts text content from the current page."""
+
+    async def extract(selector: str = "body") -> str:
+        return await session.extract(selector)
+
+    return Tool(
+        name="browser_extract",
+        description="Extract text content from the current browser page using a CSS selector.",
+        fn=extract,
+        parameters={"selector": "CSS selector to extract text from (default: body)"},
+    )
+
+
+def make_browser_screenshot_tool(session) -> Tool:
+    """Tool that takes a screenshot of the current browser page."""
+
+    async def screenshot() -> str:
+        return await session.screenshot()
+
+    return Tool(
+        name="browser_screenshot",
+        description="Take a screenshot of the current browser page.",
+        fn=screenshot,
+        parameters={},
+    )
+
+
+def make_deploy_tool(
+    sandbox: ToolSandbox = None,
+    policy: AgentToolPolicy = None,
+) -> Tool:
     """Tool that deploys to Vercel."""
+    policy = policy or AgentToolPolicy.from_env()
+    sandbox = sandbox or ToolSandbox(policy)
 
     async def deploy(project_path: str, provider: str = "vercel") -> str:
-        import asyncio
         if provider == "vercel":
-            cmd = f"cd {project_path} && vercel --prod --yes"
+            cmd = "vercel --prod --yes"
         else:
             return f"Unknown deploy provider: {provider}"
 
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+        output = await sandbox.run_command(
+            command=cmd,
+            cwd=project_path,
+            max_output_chars=4000,
+            timeout_sec=1200,
         )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode()[-2000:]
-        status = "SUCCESS" if proc.returncode == 0 else "FAILED"
-        return f"Deploy {status}\n{output}"
+        return f"Deploy result\n{output}"
 
     return Tool(
         name="deploy",
@@ -282,8 +430,8 @@ def make_write_agent_config_tool(config_dir: str = "agents") -> Tool:
         schedule: str = "",
         budget_limit_usd: float = 5.0,
     ) -> str:
-        import os
         import yaml
+        policy = AgentToolPolicy.from_env()
 
         config = {
             "name": name,
@@ -298,12 +446,13 @@ def make_write_agent_config_tool(config_dir: str = "agents") -> Tool:
         if schedule:
             config["schedule"] = schedule
 
-        os.makedirs(config_dir, exist_ok=True)
-        path = os.path.join(config_dir, f"{name}.yaml")
-        with open(path, "w") as f:
+        path = f"{config_dir}/{name}.yaml"
+        resolved = policy.resolve_write_path(path)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        with resolved.open("w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False)
 
-        return f"Agent config written to {path}"
+        return f"Agent config written to {resolved}"
 
     return Tool(
         name="write_agent_config",

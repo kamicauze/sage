@@ -3,22 +3,36 @@
     "name": "Sage Mobile",
     "slug": "sage-mobile",
     "version": "0.1.0",
+    "scheme": "sage-mobile",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#040c1c"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sage.mobile"
     },
     "android": {
+      "package": "com.sage.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#0f172a"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#040c1c"
       }
+    },
+    "web": {
+      "favicon": "./assets/icon.png"
     },
     "plugins": [
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ]
   }
 }

@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   Bell,
   ChevronRight,
@@ -14,44 +14,30 @@ import { ScreenLayout } from "../components/layout/ScreenLayout";
 import { GlassCard } from "../components/ui/GlassCard";
 import { GlassButton } from "../components/ui/GlassButton";
 import { COLORS, LAYOUT, RADIUS, SPACING } from "../constants/theme";
+import { VisionLatestResponse } from "../types/vision";
+import { TabName } from "../components/navigation/TabBar";
 
 interface NodeItem {
   name: string;
   detail: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
-  state: "online" | "active" | "sleep" | "spend";
+  state: "online" | "active" | "sleep" | "offline" | "spend";
   rightText?: string;
   rightSubText?: string;
 }
 
-const NODES: NodeItem[] = [
-  {
-    name: "Mini",
-    detail: "Online",
-    icon: Server,
-    state: "online",
-  },
-  {
-    name: "Jetson",
-    detail: "Summarizing...",
-    icon: Cpu,
-    state: "active",
-  },
-  {
-    name: "Workstation",
-    detail: "Sleeping",
-    icon: Monitor,
-    state: "sleep",
-  },
-  {
-    name: "Cloud Cluster",
-    detail: "us-east-1",
-    icon: Cloud,
-    state: "spend",
-    rightText: "$4.20",
-    rightSubText: "DAILY SPEND",
-  },
-];
+interface DashboardScreenProps {
+  brainOnline: boolean;
+  mqttOnline: boolean;
+  apiStatus: string;
+  lastModel: string | null;
+  lastLatencyMs: number | null;
+  vision: VisionLatestResponse | null;
+  onRefreshVision: () => void;
+  isVisionRefreshing: boolean;
+  onNavigate: (tab: TabName) => void;
+  approvalCount: number;
+}
 
 function getStatusColor(state: NodeItem["state"]) {
   switch (state) {
@@ -61,6 +47,8 @@ function getStatusColor(state: NodeItem["state"]) {
       return COLORS.accent.primary;
     case "sleep":
       return COLORS.status.offline;
+    case "offline":
+      return COLORS.status.critical;
     case "spend":
       return COLORS.status.online;
     default:
@@ -68,32 +56,130 @@ function getStatusColor(state: NodeItem["state"]) {
   }
 }
 
-export function DashboardScreen() {
+export function DashboardScreen({
+  brainOnline,
+  mqttOnline,
+  apiStatus,
+  lastModel,
+  lastLatencyMs,
+  vision,
+  onRefreshVision,
+  isVisionRefreshing,
+  onNavigate,
+  approvalCount,
+}: DashboardScreenProps) {
+  const nodes: NodeItem[] = [
+    {
+      name: "Mac Mini Brain",
+      detail: brainOnline ? "Online" : "Unavailable",
+      icon: Server,
+      state: brainOnline ? "online" : "offline",
+    },
+    {
+      name: "MQTT Event Bus",
+      detail: mqttOnline ? "Connected" : "Broker unreachable",
+      icon: Cloud,
+      state: mqttOnline ? "active" : "offline",
+    },
+    {
+      name: "4070 Ti Worker",
+      detail: "Waiting for distributed link",
+      icon: Monitor,
+      state: "sleep",
+    },
+    {
+      name: "Jetson Edge",
+      detail: "Waiting for distributed link",
+      icon: Cpu,
+      state: "sleep",
+    },
+  ];
+  const activeCount = nodes.filter((node) => node.state === "online" || node.state === "active").length;
+  const apiHealthy = apiStatus === "healthy";
+  const frameUri = React.useMemo(() => {
+    if (!vision?.frame_available || !vision?.image_base64) {
+      return null;
+    }
+    const mime = vision.mime_type || "image/jpeg";
+    return `data:${mime};base64,${vision.image_base64}`;
+  }, [vision]);
+  const staleLabel =
+    typeof vision?.stale_seconds === "number"
+      ? `${Math.round(vision.stale_seconds)}s ago`
+      : "No timestamp";
+
   return (
     <ScreenLayout>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View style={styles.topBar}>
-          <Pressable style={styles.iconButton}>
+          <Pressable style={styles.iconButton} onPress={() => onNavigate("settings")}>
             <Menu size={22} color={COLORS.text.secondary} />
           </Pressable>
-          <Pressable style={styles.iconButton}>
+          <Pressable style={styles.iconButton} onPress={() => onNavigate("approvals")}>
             <Bell size={20} color={COLORS.text.secondary} />
-            <View style={styles.notificationDot} />
+            {approvalCount > 0 && <View style={styles.notificationDot} />}
           </Pressable>
         </View>
 
         <View style={styles.hero}>
-          <View style={styles.statusOrb} />
-          <Text style={styles.heroTitle}>Sage: Idle</Text>
-          <Text style={styles.heroSubtitle}>ALL SYSTEMS NOMINAL</Text>
+          <View
+            style={[
+              styles.statusOrb,
+              { backgroundColor: apiHealthy ? COLORS.status.online : COLORS.status.critical },
+            ]}
+          />
+          <Text style={styles.heroTitle}>{apiHealthy ? "Sage: Ready" : "Sage: Degraded"}</Text>
+          <Text style={styles.heroSubtitle}>
+            {lastModel
+              ? `${lastModel}${lastLatencyMs ? ` • ${lastLatencyMs}ms` : ""}`
+              : "No recent model response"}
+          </Text>
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionLabel}>NODES</Text>
-          <Text style={styles.sectionMeta}>4 Active</Text>
+          <Text style={styles.sectionLabel}>VISION</Text>
+          <Pressable onPress={onRefreshVision} disabled={isVisionRefreshing}>
+            <Text style={styles.sectionAction}>
+              {isVisionRefreshing ? "Refreshing..." : "Scan now"}
+            </Text>
+          </Pressable>
         </View>
 
-        {NODES.map((node) => {
+        <GlassCard style={styles.visionCard} variant="soft">
+          <View style={styles.visionHeader}>
+            <Text style={styles.visionTitle}>
+              {vision?.location ? `Camera: ${vision.location}` : "Camera feed"}
+            </Text>
+            <Text style={styles.visionMeta}>{staleLabel}</Text>
+          </View>
+          {frameUri ? (
+            <Image source={{ uri: frameUri }} style={styles.visionImage} resizeMode="cover" />
+          ) : (
+            <View style={styles.visionPlaceholder}>
+              <Text style={styles.visionPlaceholderText}>
+                No frame yet. Enable `VISION_PUBLISH_FRAMES=1` on Jetson.
+              </Text>
+            </View>
+          )}
+          <Text style={styles.visionSummary}>
+            {vision?.scene_description || "Waiting for scene description..."}
+          </Text>
+          <View style={styles.visionStatsRow}>
+            <Text style={styles.visionStat}>People: {vision?.people_count ?? 0}</Text>
+            <Text style={styles.visionStat}>Activity: {vision?.activity || "unknown"}</Text>
+            <Text style={styles.visionStat}>Mood: {vision?.mood || "unknown"}</Text>
+          </View>
+          <Text style={styles.visionObjects}>
+            Objects: {vision?.objects?.length ? vision.objects.slice(0, 6).join(", ") : "none"}
+          </Text>
+        </GlassCard>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>NODES</Text>
+          <Text style={styles.sectionMeta}>{activeCount}/4 Active</Text>
+        </View>
+
+        {nodes.map((node) => {
           const Icon = node.icon;
           const stateColor = getStatusColor(node.state);
 
@@ -135,7 +221,7 @@ export function DashboardScreen() {
         })}
 
         <GlassButton
-          onPress={() => undefined}
+          onPress={() => onNavigate("control")}
           variant="secondary"
           style={styles.diagnosticsButton}
         >
@@ -219,6 +305,77 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     fontSize: 14,
     letterSpacing: 0.8,
+  },
+  sectionAction: {
+    color: COLORS.accent.primary,
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+  },
+  visionCard: {
+    marginBottom: SPACING.l,
+    borderRadius: RADIUS.l,
+  },
+  visionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: SPACING.s,
+  },
+  visionTitle: {
+    color: COLORS.text.primary,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  visionMeta: {
+    color: COLORS.text.secondary,
+    fontSize: 11,
+  },
+  visionImage: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: RADIUS.m,
+    backgroundColor: "rgba(9, 18, 38, 0.6)",
+    marginBottom: SPACING.s,
+  },
+  visionPlaceholder: {
+    width: "100%",
+    aspectRatio: 16 / 9,
+    borderRadius: RADIUS.m,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(9, 18, 38, 0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(56, 88, 145, 0.4)",
+    marginBottom: SPACING.s,
+    paddingHorizontal: SPACING.m,
+  },
+  visionPlaceholderText: {
+    color: COLORS.text.secondary,
+    fontSize: 12,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  visionSummary: {
+    color: COLORS.text.primary,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: SPACING.s,
+  },
+  visionStatsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACING.m,
+    marginBottom: SPACING.xs,
+  },
+  visionStat: {
+    color: COLORS.text.secondary,
+    fontSize: 12,
+  },
+  visionObjects: {
+    color: COLORS.text.secondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
   nodeCard: {
     marginBottom: SPACING.m,

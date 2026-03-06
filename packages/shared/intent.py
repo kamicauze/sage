@@ -93,6 +93,8 @@ HOME_TRIGGERS = [
     r'\bwhat.{0,10}(is|the).{0,10}(temperature|humidity|motion|time)\b',
     r'\b(dim|brighten)\b.{0,10}\b(light|lights)\b',
     r'\b(lock|unlock)\b.{0,10}\b(door|doors)\b',
+    r'\b(run|activate|trigger|start)\b.{0,20}\b(scene|routine)\b',
+    r'\b(list|show|what)\b.{0,10}\b(devices|scenes)\b',
 ]
 
 # Status/info queries (stay in brain, don't trigger architect)
@@ -191,11 +193,45 @@ def _apply_context_bias(intent: Intent, context: Dict[str, Any]) -> Intent:
 
     When we're in an emotional conversation, ambiguous inputs should stay in that flow.
     When we're in a technical conversation, "fix that" means code, not feelings.
+    Includes intent momentum: consecutive same-type intents boost confidence.
     """
     mode = context.get("mode", "neutral")
     emotional_mode = context.get("emotional_mode", False)
     turns_in_mode = context.get("turns_in_mode", 0)
     recent_intents = context.get("recent_intents", []) or []
+
+    # Intent momentum: if recent intents are the same type, boost confidence
+    if len(recent_intents) >= 2:
+        dominant = recent_intents[-1]
+        momentum = sum(1 for i in recent_intents if i == dominant) / len(recent_intents)
+        if momentum >= 0.67 and intent.type == dominant and intent.confidence < 0.85:
+            boost = round(0.15 * momentum, 3)
+            boosted_conf = min(0.90, intent.confidence + boost)
+            print(
+                f"[Intent] Momentum boost: {intent.type} confidence "
+                f"{intent.confidence:.2f} -> {boosted_conf:.2f}"
+            )
+            intent = Intent(
+                type=intent.type, project=intent.project, query=intent.query,
+                original=intent.original, confidence=boosted_conf,
+                method=intent.method,
+                signals={**intent.signals, "momentum_boost": True, "momentum": momentum}
+            )
+
+    # Deep emotional mode inertia: require high confidence to break out
+    if (
+        turns_in_mode >= 5
+        and emotional_mode
+        and intent.type != "brain_query"
+        and intent.confidence < 0.90
+    ):
+        print(f"[Intent] Deep emotional mode inertia: keeping brain_query (turns={turns_in_mode})")
+        return Intent(
+            type="brain_query", project=None, query=intent.original,
+            original=intent.original, confidence=0.85,
+            method="context",
+            signals={**intent.signals, "emotional_inertia": True, "turns_in_mode": turns_in_mode}
+        )
 
     # If we're in emotional mode and confidence is low, bias toward brain_query
     if emotional_mode and intent.confidence < CONFIDENCE_THRESHOLD:
@@ -390,6 +426,8 @@ def _rule_based_classify(transcript: str) -> Intent:
         (r'\b(turn|switch)\s+(on|off)\b.{0,15}\b(light|lights|lamp|fan|ac)\b', 0.95),
         (r'\bset\s+(a\s+)?timer\b', 0.90),
         (r'\bwhat.{0,5}(is|the).{0,5}temperature\b', 0.90),
+        (r'\b(run|activate|trigger|start)\b.{0,20}\b(scene|routine)\b', 0.90),
+        (r'\b(list|show|what)\b.{0,10}\b(devices|scenes)\b', 0.85),
         
         # Medium confidence
         (r'\b(dim|brighten)\b', 0.70),

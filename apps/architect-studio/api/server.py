@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from architect.api.routes import approvals, builds, chat, stats, memory, projects
+from architect.api.routes import approvals, builds, chat, stats, memory, projects, news, google_workspace, webhooks, tasks, vault, agent_permissions, project_control
 from architect.api.websocket import websocket_endpoint
 from architect.api.models import HealthResponse, ErrorResponse, API_VERSION, API_COMPAT
 from architect.api.security import (
@@ -202,6 +202,13 @@ app.include_router(stats.router)
 app.include_router(memory.router)
 app.include_router(approvals.router)
 app.include_router(chat.router)
+app.include_router(news.router)
+app.include_router(google_workspace.router)
+app.include_router(webhooks.router)
+app.include_router(tasks.router)
+app.include_router(vault.router)
+app.include_router(agent_permissions.router)
+app.include_router(project_control.router)
 if mcp is not None:
     app.include_router(mcp.router)  # MCP integrations
 

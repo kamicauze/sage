@@ -7,9 +7,12 @@ The routing decision is based on a composite score (0-15) from:
 2. RAG context size
 3. Explicit user escalation phrases
 4. Token estimate (large context needs)
+5. Historical outcome bias (learned from past routing decisions)
 """
 import hashlib
+import json as _json
 import os
+import time as _time
 from dataclasses import dataclass
 from typing import List, Dict, Optional
 
@@ -375,9 +378,10 @@ class UnifiedRouter:
         ctx_score = self.score_context(rag_docs)
         exp_score = self.score_explicit(query)
         tok_score = self.score_token_estimate(query, rag_docs)
-        
-        total = kw_score + ctx_score + exp_score + tok_score
-        
+        hist_bias = compute_history_bias(task_type)
+
+        total = max(0, kw_score + ctx_score + exp_score + tok_score + hist_bias)
+
         # Build reason string for debugging
         reason_parts = []
         if kw_score > 0:
@@ -388,6 +392,8 @@ class UnifiedRouter:
             reason_parts.append(f"explicit={exp_score}")
         if tok_score > 0:
             reason_parts.append(f"tokens={tok_score}")
+        if hist_bias != 0:
+            reason_parts.append(f"history={hist_bias:+d}")
         
         # Determine route based on thresholds
         hybrid_th = self.thresholds['hybrid_score']
@@ -455,6 +461,108 @@ class UnifiedRouter:
             model=model,
             task_type=task_type
         )
+
+
+# ---------------------------------------------------------------------------
+# Routing History — learn from past outcomes
+# ---------------------------------------------------------------------------
+
+_ROUTING_HISTORY_DIR = os.getenv("SAGE_ROUTING_HISTORY_DIR", "")
+
+
+def _routing_history_path(project_id: str = "default") -> str:
+    base = _ROUTING_HISTORY_DIR or os.path.join(
+        os.path.dirname(__file__), "..", ".routing_history"
+    )
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, f"{project_id}.jsonl")
+
+
+def log_routing_outcome(
+    decision: RouteDecision,
+    status: str,
+    elapsed_ms: int = 0,
+    actual_cost: float = 0.0,
+    project_id: str = "default",
+):
+    """Append a routing outcome to the history file."""
+    entry = {
+        "ts": _time.time(),
+        "route": decision.route,
+        "provider": decision.provider,
+        "model": decision.model,
+        "score": decision.score,
+        "task_type": decision.task_type,
+        "status": status,
+        "elapsed_ms": elapsed_ms,
+        "cost": actual_cost,
+    }
+    try:
+        path = _routing_history_path(project_id)
+        with open(path, "a") as f:
+            f.write(_json.dumps(entry) + "\n")
+    except Exception:
+        pass
+
+
+def _load_routing_history(project_id: str = "default", max_entries: int = 50) -> List[Dict]:
+    """Load the last N routing history entries."""
+    path = _routing_history_path(project_id)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r") as f:
+            lines = f.readlines()
+        entries = []
+        for line in lines[-max_entries:]:
+            try:
+                entries.append(_json.loads(line.strip()))
+            except Exception:
+                continue
+        return entries
+    except Exception:
+        return []
+
+
+def compute_history_bias(task_type: str, project_id: str = "default") -> int:
+    """
+    Compute a score bias from routing history.
+    If local succeeded for similar tasks → bias toward local (negative).
+    If local failed but cloud succeeded → bias toward cloud (positive).
+    Max bias: +/-2 points.
+    """
+    history = _load_routing_history(project_id, max_entries=20)
+    if not history:
+        return 0
+
+    local_success = 0
+    local_fail = 0
+    cloud_success = 0
+
+    for entry in history:
+        if entry.get("task_type") != task_type:
+            continue
+        route = entry.get("route", "")
+        status = str(entry.get("status", "")).upper()
+        if route == "LOCAL":
+            if status == "SUCCESS":
+                local_success += 1
+            else:
+                local_fail += 1
+        elif route in ("CLOUD", "HYBRID"):
+            if status == "SUCCESS":
+                cloud_success += 1
+
+    if local_success > 2 and local_fail == 0:
+        return -2  # Strong local bias
+    elif local_success > 0 and local_fail == 0:
+        return -1
+    elif local_fail > 1 and cloud_success > 0:
+        return 2  # Strong cloud bias
+    elif local_fail > 0 and cloud_success > 0:
+        return 1
+
+    return 0
 
 
 # Convenience function for quick routing
