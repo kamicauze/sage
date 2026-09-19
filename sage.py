@@ -852,6 +852,65 @@ def cmd_train(args):
         print(f"Unknown train command: {subcmd}")
         print("Available: setup, prepare-tts, tts, prepare-stt, stt, export-stt, prepare-feedback, eval")
 
+def cmd_switches(args):
+    """
+    Minimal voice loop: STT -> switch controller -> Zigbee panel (or simulator) -> TTS.
+    No brain, no LLM, no architect. See docs/VOICE_SWITCH_BASICS.md.
+    """
+    print("🔀 Starting Sage voice switches (STT + switch controller + TTS)...")
+
+    if getattr(args, "say", None):
+        subprocess.run([sys.executable, "-m", "brain.devices.switch_controller", "--say", args.say])
+        return
+    if getattr(args, "discover", False):
+        subprocess.run([sys.executable, "-m", "brain.devices.switch_controller", "--discover"])
+        return
+
+    p_mqtt, success = ensure_mosquitto_running()
+    if not success and p_mqtt is None:
+        return
+
+    processes = []
+    if p_mqtt:
+        processes.append((p_mqtt, None))
+
+    try:
+        if getattr(args, "sim", False):
+            p_node, _ = run_process_async([sys.executable, "-m", "brain.devices.switch_node", "--backend", "sim"])
+            processes.append((p_node, None))
+            print("   - Simulated switch panel started (no hardware; prints ON/OFF)")
+        else:
+            print("   - Real switches: expecting Zigbee2MQTT on this broker (use --sim to fake the panel)")
+
+        p_ctl, _ = run_process_async([sys.executable, "-m", "brain.devices.switch_controller"])
+        processes.append((p_ctl, None))
+        print("   - Switch controller started (listens on sage/voice/transcript)")
+
+        if getattr(args, "no_stt", False):
+            print("   - Ears skipped (--no-stt); inject text with: ./sage switches --say 'lamp on'")
+        else:
+            p_stt, _ = run_process_async([sys.executable, "-m", "brain.voice.transcriber"])
+            processes.append((p_stt, None))
+            print("   - Ears started (STT)")
+
+        if getattr(args, "no_tts", False):
+            print("   - Mouth skipped (--no-tts)")
+        else:
+            p_tts, _ = run_process_async([sys.executable, "-m", "brain.voice.speaker"])
+            processes.append((p_tts, None))
+            print("   - Mouth started (TTS)")
+
+        print("\n[Press Ctrl+C to stop all services]")
+        while True:
+            if any(p.poll() is not None for p, _ in processes):
+                print("\n[CLI] A service died unexpectedly!")
+                break
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        kill_processes(processes)
+
 def cmd_stop(args):
     print("🛑 Stopping Sage Services...")
     patterns = [
@@ -860,6 +919,8 @@ def cmd_stop(args):
         "architect.api.server:app",
         "brain.voice.transcriber",
         "brain.voice.speaker",
+        "brain.devices.switch_controller",
+        "brain.devices.switch_node",
         "hybrid_pipeline.py",
         "vision_service.py",
         "mosquitto",
@@ -973,6 +1034,14 @@ def main():
     parser_voice = subparsers.add_parser("voice", help="Start Voice Services (STT+TTS)")
     parser_voice.add_argument("--no-tts", action="store_true", help="Disable TTS (Mouth)")
     parser_voice.set_defaults(func=cmd_voice)
+
+    parser_switches = subparsers.add_parser("switches", help="Minimal voice loop: STT + switch controller + TTS (no brain)")
+    parser_switches.add_argument("--sim", action="store_true", help="Run a simulated switch panel instead of Zigbee2MQTT")
+    parser_switches.add_argument("--no-stt", action="store_true", help="Do not start STT (use --say to inject text)")
+    parser_switches.add_argument("--no-tts", action="store_true", help="Do not start TTS")
+    parser_switches.add_argument("--say", metavar="TEXT", help="Inject TEXT as a transcript into a running loop and exit")
+    parser_switches.add_argument("--discover", action="store_true", help="List Zigbee2MQTT devices and their switch keys")
+    parser_switches.set_defaults(func=cmd_switches)
 
     parser_start = subparsers.add_parser("start", help="Start Everything (Brain+Voice)")
     parser_start.add_argument("--no-tts", action="store_true", help="Disable TTS (Mouth)")

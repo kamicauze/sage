@@ -30,6 +30,20 @@ This launches:
 - Mobile-friendly (install as app)
 - Works on phone via Tailscale/WiFi
 
+### Voice → Zigbee Switches (Minimal Loop)
+
+To test STT/TTS end to end without the LLM brain, run only the microphone,
+a rule-based switch controller, and the speaker:
+
+```bash
+./sage switches --discover      # list Zigbee2MQTT devices, fill devices/switches.json
+./sage switches                 # mic → STT → Zigbee panel → TTS confirmation
+./sage switches --sim           # same, with a simulated panel (no hardware)
+./sage switches --say "lamp on" # inject text instead of speaking
+```
+
+See [docs/VOICE_SWITCH_BASICS.md](docs/VOICE_SWITCH_BASICS.md).
+
 ### Distributed Hardware Setup (Pi 5 + Orin + RTX)
 
 If you are splitting runtime by device:

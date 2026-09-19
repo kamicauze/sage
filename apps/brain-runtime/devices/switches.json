@@ -1,0 +1,36 @@
+{
+  "_comment": "Voice-controllable switches. 'aliases' are what you say. Zigbee devices go through Zigbee2MQTT: set 'zigbee_name' to the friendly name shown in Zigbee2MQTT (run: python -m brain.devices.switch_controller --discover) and 'state_key' to the gang (state, state_l1, state_l2, ...). Other optional keys: command_topic, state_topic, payload_on, payload_off, payload_toggle, gpio_pin, active_high.",
+  "zigbee2mqtt_base": "zigbee2mqtt",
+  "switches": [
+    {
+      "id": "panel_1",
+      "name": "main light",
+      "aliases": ["main light", "main lights", "big light", "ceiling light", "office light", "office lights"],
+      "group": "lights",
+      "room": "office",
+      "protocol": "zigbee2mqtt",
+      "zigbee_name": "office_panel",
+      "state_key": "state_l1"
+    },
+    {
+      "id": "panel_2",
+      "name": "desk lamp",
+      "aliases": ["desk lamp", "lamp", "desk light"],
+      "group": "lights",
+      "room": "office",
+      "protocol": "zigbee2mqtt",
+      "zigbee_name": "office_panel",
+      "state_key": "state_l2"
+    },
+    {
+      "id": "panel_3",
+      "name": "fan",
+      "aliases": ["fan", "ceiling fan"],
+      "group": "fans",
+      "room": "office",
+      "protocol": "zigbee2mqtt",
+      "zigbee_name": "office_panel",
+      "state_key": "state_l3"
+    }
+  ]
+}
