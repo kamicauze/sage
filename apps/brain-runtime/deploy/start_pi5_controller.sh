@@ -15,6 +15,7 @@ MQTT_PORT="${MQTT_PORT:-1883}"
 SAGE_SKIP_BROKER="${SAGE_SKIP_BROKER:-0}"
 SAGE_MQTT_CONFIG="${SAGE_MQTT_CONFIG:-$ROOT_DIR/mosquitto.conf}"
 SAGE_SENSOR_CMD="${SAGE_SENSOR_CMD:-}"
+SAGE_SWITCH_CONTROLLER="${SAGE_SWITCH_CONTROLLER:-1}"   # voice -> Zigbee2MQTT switch controller
 
 PIDS=()
 
@@ -47,6 +48,19 @@ fi
 
 echo "[Pi5] Sensor controller ready"
 echo "[Pi5] MQTT port: ${MQTT_PORT}"
+
+if [[ "$SAGE_SWITCH_CONTROLLER" == "1" ]]; then
+  if [[ -d "$ROOT_DIR/.venv" ]]; then
+    # shellcheck source=/dev/null
+    source "$ROOT_DIR/.venv/bin/activate"
+  fi
+  echo "[Pi5] Starting switch controller (sage/voice/transcript -> zigbee2mqtt/<panel>/set)"
+  (
+    cd "$ROOT_DIR"
+    MQTT_HOST="${MQTT_HOST:-localhost}" MQTT_PORT="$MQTT_PORT" python3 -u -m brain.devices.switch_controller
+  ) &
+  PIDS+=("$!")
+fi
 
 if [[ -n "$SAGE_SENSOR_CMD" ]]; then
   echo "[Pi5] Starting sensor command: $SAGE_SENSOR_CMD"

@@ -137,7 +137,24 @@ STT slips like "turn of the lamp" and "lights of" are corrected before parsing.
 If the transcriber mishears a device name consistently, add the misheard form as
 an alias rather than fighting the model.
 
-## 4. Where this fits later
+## 4. Split across the Pi and the voice box
+
+The Pi holds the Zigbee dongle, Zigbee2MQTT and Mosquitto, so the switch controller
+belongs there too (it only needs `paho-mqtt`). STT and TTS stay on the GPU box.
+
+```bash
+# Pi 5: broker + Zigbee2MQTT (already running) + switch controller
+./sage switches --check                                   # once, to verify the panel
+bash apps/brain-runtime/deploy/start_pi5_controller.sh    # SAGE_SWITCH_CONTROLLER=1 by default
+
+# Orin / 4070: mic + speaker, pointed at the Pi's broker
+MQTT_HOST=<pi-ip> bash apps/brain-runtime/deploy/start_orin_voice.sh
+```
+
+Typed test from any machine on the LAN, no mic:
+`MQTT_HOST=<pi-ip> ./sage switches --say "lamp on"`.
+
+## 5. Where this fits later
 
 The brain (`apps/brain-runtime/main.py`) also subscribes to `sage/voice/transcript`.
 Do not run `./sage pwa` / `./sage start` at the same time as `./sage switches`, or
