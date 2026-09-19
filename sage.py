@@ -865,6 +865,8 @@ def cmd_switches(args):
     if getattr(args, "discover", False):
         subprocess.run([sys.executable, "-m", "brain.devices.switch_controller", "--discover"])
         return
+    if getattr(args, "check", False):
+        sys.exit(subprocess.call([sys.executable, "-m", "brain.devices.check_setup"]))
 
     p_mqtt, success = ensure_mosquitto_running()
     if not success and p_mqtt is None:
@@ -1041,6 +1043,7 @@ def main():
     parser_switches.add_argument("--no-tts", action="store_true", help="Do not start TTS")
     parser_switches.add_argument("--say", metavar="TEXT", help="Inject TEXT as a transcript into a running loop and exit")
     parser_switches.add_argument("--discover", action="store_true", help="List Zigbee2MQTT devices and their switch keys")
+    parser_switches.add_argument("--check", action="store_true", help="Check broker, Zigbee2MQTT, panel and switches.json end to end")
     parser_switches.set_defaults(func=cmd_switches)
 
     parser_start = subparsers.add_parser("start", help="Start Everything (Brain+Voice)")

@@ -346,3 +346,36 @@ class DiscoverTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckSetupTests(unittest.TestCase):
+    def test_bridge_online_forms(self):
+        from brain.devices.check_setup import bridge_online
+        self.assertTrue(bridge_online(b"online"))
+        self.assertTrue(bridge_online('{"state": "online"}'))
+        self.assertFalse(bridge_online(b"offline"))
+        self.assertIsNone(bridge_online(None))
+
+    def test_compare_registry_to_bridge(self):
+        from brain.devices.check_setup import compare_registry_to_bridge
+        reg = panel_registry()
+        devices = [
+            {"type": "Router", "friendly_name": "office_panel", "definition": {"model": "TS0013", "exposes": [
+                {"type": "switch", "features": [{"type": "binary", "property": "state_l1"}]},
+                {"type": "switch", "features": [{"type": "binary", "property": "state_l2"}]},
+            ]}},
+            {"type": "Router", "friendly_name": "spare_plug", "definition": {"model": "P", "exposes": [
+                {"type": "switch", "features": [{"type": "binary", "property": "state"}]}]}},
+        ]
+        cmp = compare_registry_to_bridge(reg, devices)
+        self.assertEqual(len(cmp["ok"]), 2)                    # l1, l2
+        self.assertEqual(len(cmp["missing_key"]), 1)           # fan wants state_l3, panel has only two gangs
+        self.assertIn("state_l3", cmp["missing_key"][0])
+        self.assertEqual(cmp["missing_device"], [])
+        self.assertEqual(len(cmp["unregistered"]), 1)
+        self.assertIn("spare_plug", cmp["unregistered"][0])
+
+    def test_compare_reports_missing_device(self):
+        from brain.devices.check_setup import compare_registry_to_bridge
+        cmp = compare_registry_to_bridge(panel_registry(), [])
+        self.assertEqual(len(cmp["missing_device"]), 3)

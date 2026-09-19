@@ -67,6 +67,17 @@ Copy the friendly name and the gang keys into `apps/brain-runtime/devices/switch
 - Other MQTT switches (Tasmota, Shelly, …) work too: give `command_topic`,
   `state_topic`, `payload_on`, `payload_off` explicitly.
 
+Then check the whole chain from the machine that talks to the broker (the Pi):
+
+```bash
+./sage switches --check
+```
+
+It verifies: `switches.json` loads, the broker is reachable, Zigbee2MQTT is online,
+every `zigbee_name`/`state_key` in the registry exists on a paired device, lists
+paired switches you have not registered yet, and asks each panel for its live
+state. Fix the ❌ lines and rerun until it says PASS.
+
 ## 2. Test each stage on its own
 
 **Parser only, no broker, no audio:**

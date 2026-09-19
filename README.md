@@ -37,6 +37,7 @@ a rule-based switch controller, and the speaker:
 
 ```bash
 ./sage switches --discover      # list Zigbee2MQTT devices, fill devices/switches.json
+./sage switches --check         # verify broker + Zigbee2MQTT + panel + switches.json
 ./sage switches                 # mic → STT → Zigbee panel → TTS confirmation
 ./sage switches --sim           # same, with a simulated panel (no hardware)
 ./sage switches --say "lamp on" # inject text instead of speaking
