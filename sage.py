@@ -852,6 +852,17 @@ def cmd_train(args):
         print(f"Unknown train command: {subcmd}")
         print("Available: setup, prepare-tts, tts, prepare-stt, stt, export-stt, prepare-feedback, eval")
 
+def cmd_voicecheck(args):
+    """Measure STT/TTS over MQTT: ./sage voicecheck status|tts|stt|wav|all"""
+    cmd = [sys.executable, "-m", "brain.voice.voice_check", args.mode] + list(args.files or [])
+    if args.phrases:
+        cmd += ["--phrases", args.phrases]
+    if args.interactive:
+        cmd.append("--interactive")
+    if args.report:
+        cmd += ["--report", args.report]
+    sys.exit(subprocess.call(cmd))
+
 def cmd_switches(args):
     """
     Minimal voice loop: STT -> switch controller -> Zigbee panel (or simulator) -> TTS.
@@ -1036,6 +1047,14 @@ def main():
     parser_voice = subparsers.add_parser("voice", help="Start Voice Services (STT+TTS)")
     parser_voice.add_argument("--no-tts", action="store_true", help="Disable TTS (Mouth)")
     parser_voice.set_defaults(func=cmd_voice)
+
+    parser_vc = subparsers.add_parser("voicecheck", help="Measure STT/TTS quality and latency over MQTT")
+    parser_vc.add_argument("mode", choices=["status", "tts", "stt", "wav", "all"])
+    parser_vc.add_argument("files", nargs="*", help="WAV files (wav mode)")
+    parser_vc.add_argument("--phrases", help="File with one test phrase per line")
+    parser_vc.add_argument("--interactive", action="store_true", help="Rate each TTS phrase by ear")
+    parser_vc.add_argument("--report", help="Write JSON results here")
+    parser_vc.set_defaults(func=cmd_voicecheck)
 
     parser_switches = subparsers.add_parser("switches", help="Minimal voice loop: STT + switch controller + TTS (no brain)")
     parser_switches.add_argument("--sim", action="store_true", help="Run a simulated switch panel instead of Zigbee2MQTT")

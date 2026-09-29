@@ -117,6 +117,23 @@ and reports state back exactly like Zigbee2MQTT does.
 Speak, pause, and watch the three logs: `[Transcriber] 📝 Transcribed`, then
 `[SwitchCtl] → zigbee2mqtt/...`, then `[Speaker] Playing audio`.
 
+### Measure STT and TTS
+
+With the transcriber and speaker running (on the voice box, pointed at the broker):
+
+```bash
+./sage voicecheck status    # are both services up, which engine/model
+./sage voicecheck tts       # speaks the confirmation phrases; time-to-first-audio and gen time each
+./sage voicecheck stt       # prompts you to say each switch command; WER, latency, parser hit/miss
+./sage voicecheck all --report voice_report.json
+./sage voicecheck wav clip1.wav clip2.wav   # offline, same STT settings (clip1.txt = expected text)
+```
+
+The STT number that matters is "parser would act correctly on N/M": a mishearing
+like "switch of the fan" has a non-zero word error rate but still flips the fan.
+Consistent misses of a device name are fixed by adding the misheard form as an alias.
+Keep TTS quiet during the STT test (the transcriber pauses itself while TTS speaks).
+
 ## 3. What you can say
 
 | Say | Does |
