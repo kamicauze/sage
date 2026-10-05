@@ -45,20 +45,21 @@ a rule-based switch controller, and the speaker:
 
 See [docs/VOICE_SWITCH_BASICS.md](docs/VOICE_SWITCH_BASICS.md).
 
-### Distributed Hardware Setup (Pi 5 + Orin + RTX)
+### Distributed Hardware Setup (Mini + Pi 5 + 4070 + Orin)
 
-If you are splitting runtime by device:
+| Machine | Role | Start | Check |
+|---|---|---|---|
+| Mac Mini M4 Pro | hub: MQTT broker, switch controller, later the LLM brain | `bash apps/brain-runtime/deploy/start_mini_hub.sh` | `./sage nodecheck hub` |
+| Raspberry Pi 5 | home: Zigbee2MQTT + dongle | Zigbee2MQTT service | `./sage nodecheck home` |
+| RTX 4070 Ti 12GB | voice: STT + TTS | `bash apps/brain-runtime/deploy/start_4070_voice.sh` | `./sage nodecheck voice` |
+| Jetson Orin | vision: camera pipeline | `bash apps/brain-runtime/deploy/start_orin_vision.sh` | `./sage nodecheck vision` |
 
-- Pi 5 (MQTT broker + Zigbee2MQTT + switch controller): `bash apps/brain-runtime/deploy/start_pi5_controller.sh`
-- RTX 4070 Ti 12GB (voice STT/TTS on CUDA): `bash apps/brain-runtime/deploy/start_4070_voice.sh`
-- RTX 4070 Ti 12GB (brain + vision, optional alongside voice): `bash apps/brain-runtime/deploy/start_4070_core.sh`
-- Jetson Orin Nano 8GB (edge STT/TTS fallback): `bash apps/brain-runtime/deploy/start_orin_voice.sh`
+Every node points `MQTT_HOST` at the Mac Mini. `./sage nodecheck --list` shows all nodes'
+status from any machine. Bring-up order and per-node steps: [docs/NODE_LAYOUT.md](docs/NODE_LAYOUT.md).
+Env templates are in `apps/brain-runtime/deploy/env/`.
 
-Deployment guide and env templates are in `apps/brain-runtime/deploy/`.
-
-If you want to test modules locally on your 4070 before pushing to edge:
-
-- `bash apps/brain-runtime/deploy/start_4070_lab.sh brain|stt|tts|vision|voice|core|pwa`
+To test modules on a single 4070 before distributing:
+`bash apps/brain-runtime/deploy/start_4070_lab.sh brain|stt|tts|vision|voice|core|pwa`
 
 ### Architect (Code Generation)
 

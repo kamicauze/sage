@@ -1,5 +1,9 @@
 # Sage Distributed Cluster Architecture
 
+> **Current roles:** see [NODE_LAYOUT.md](NODE_LAYOUT.md). Changes from the plan below:
+> the Pi 5 runs Zigbee2MQTT with the Zigbee dongle, and vision moved from the 4070 to the
+> Jetson Orin so the 4070's GPU is free for speech. The Mini stays the hub.
+
 ## Nodes
 
 ### Mac Mini M4 Pro (24GB unified) — "The Brain"

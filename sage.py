@@ -852,6 +852,17 @@ def cmd_train(args):
         print(f"Unknown train command: {subcmd}")
         print("Available: setup, prepare-tts, tts, prepare-stt, stt, export-stt, prepare-feedback, eval")
 
+def cmd_nodecheck(args):
+    """Check this machine for its cluster role: ./sage nodecheck hub|home|voice|vision, or --list"""
+    cmd = [sys.executable, "-m", "brain.cluster.nodecheck"]
+    if args.list:
+        cmd.append("--list")
+    elif args.role:
+        cmd.append(args.role)
+    if args.no_publish:
+        cmd.append("--no-publish")
+    sys.exit(subprocess.call(cmd))
+
 def cmd_voicecheck(args):
     """Measure STT/TTS over MQTT: ./sage voicecheck status|tts|stt|wav|all"""
     cmd = [sys.executable, "-m", "brain.voice.voice_check", args.mode] + list(args.files or [])
@@ -934,6 +945,7 @@ def cmd_stop(args):
         "brain.voice.speaker",
         "brain.devices.switch_controller",
         "brain.devices.switch_node",
+        "brain.vision.vision_service",
         "hybrid_pipeline.py",
         "vision_service.py",
         "mosquitto",
@@ -1047,6 +1059,12 @@ def main():
     parser_voice = subparsers.add_parser("voice", help="Start Voice Services (STT+TTS)")
     parser_voice.add_argument("--no-tts", action="store_true", help="Disable TTS (Mouth)")
     parser_voice.set_defaults(func=cmd_voice)
+
+    parser_nc = subparsers.add_parser("nodecheck", help="Check this machine for its cluster role (hub/home/voice/vision)")
+    parser_nc.add_argument("role", nargs="?", choices=["hub", "home", "voice", "vision"])
+    parser_nc.add_argument("--list", action="store_true", help="Show every node's last report from the broker")
+    parser_nc.add_argument("--no-publish", action="store_true", help="Do not publish this report to the broker")
+    parser_nc.set_defaults(func=cmd_nodecheck)
 
     parser_vc = subparsers.add_parser("voicecheck", help="Measure STT/TTS quality and latency over MQTT")
     parser_vc.add_argument("mode", choices=["status", "tts", "stt", "wav", "all"])

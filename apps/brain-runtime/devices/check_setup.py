@@ -105,13 +105,15 @@ def compare_registry_to_bridge(registry: SwitchRegistry, devices: List[Dict]) ->
 def check_processes(rep: Report):
     if shutil.which("pgrep") is None:
         return
+    from brain.cluster.nodecheck import z2m_process_running
+
     probes = (
-        ("mosquitto", ["pgrep", "-x", "mosquitto"]),          # exact process name
-        ("zigbee2mqtt", ["pgrep", "-f", "[z]igbee2mqtt"]),    # runs as node; bracket trick avoids matching ourselves
+        ("mosquitto", lambda: subprocess.call(["pgrep", "-x", "mosquitto"], stdout=subprocess.DEVNULL,
+                                              stderr=subprocess.DEVNULL) == 0),
+        ("zigbee2mqtt", z2m_process_running),   # node process with a zigbee2mqtt cwd/argv
     )
-    for label, cmd in probes:
-        rc = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if rc == 0:
+    for label, probe in probes:
+        if probe():
             rep.ok(f"{label} process is running on this machine")
         else:
             rep.info(f"no local {label} process (fine if it runs on another host or in Docker)")

@@ -154,28 +154,27 @@ STT slips like "turn of the lamp" and "lights of" are corrected before parsing.
 If the transcriber mishears a device name consistently, add the misheard form as
 an alias rather than fighting the model.
 
-## 4. Split across the Pi and the 4070
+## 4. Across the machines
 
-The Pi holds the Zigbee dongle, Zigbee2MQTT and Mosquitto, so the switch controller
-belongs there too (it only needs `paho-mqtt`). STT and TTS run on the 4070 Ti, where
-CUDA gives faster-whisper medium.en ~100ms transcriptions and room for Qwen TTS.
+The broker and the switch controller run on the Mac Mini (the hub). The Pi runs only
+Zigbee2MQTT, pointed at the Mini's broker. STT and TTS run on the 4070. Full layout and
+bring-up order: [NODE_LAYOUT.md](NODE_LAYOUT.md).
 
 ```bash
-# Pi 5: broker + Zigbee2MQTT (already running) + switch controller
-./sage switches --check                                   # once, to verify the panel
-bash apps/brain-runtime/deploy/start_pi5_controller.sh    # SAGE_SWITCH_CONTROLLER=1 by default
+# Mac Mini: broker + switch controller
+bash apps/brain-runtime/deploy/start_mini_hub.sh
 
-# 4070: mic + speaker, pointed at the Pi's broker
-cp apps/brain-runtime/deploy/env/rtx4070-voice.env.example apps/brain-runtime/deploy/env/rtx4070-voice.env
-# edit MQTT_HOST, then:
-bash apps/brain-runtime/deploy/start_4070_voice.sh
-./sage voicecheck all                                     # measure STT/TTS from the same box
+# Pi 5: Zigbee2MQTT with mqtt.server: mqtt://<mini-ip>:1883, then
+MQTT_HOST=<mini-ip> ./sage switches --check
+
+# 4070: mic + speaker
+bash apps/brain-runtime/deploy/start_4070_voice.sh   # MQTT_HOST=<mini-ip> in rtx4070-voice.env
+./sage voicecheck all
 ```
 
-The Orin script (`start_orin_voice.sh`) remains as a low-VRAM fallback profile.
-
-Typed test from any machine on the LAN, no mic:
-`MQTT_HOST=<pi-ip> ./sage switches --say "lamp on"`.
+Typed test from any machine, no mic: `MQTT_HOST=<mini-ip> ./sage switches --say "lamp on"`.
+For a single-box test on the Pi alone, `SAGE_LOCAL_HUB=1 bash apps/brain-runtime/deploy/start_pi5_controller.sh`
+runs a broker and the switch controller there instead.
 
 ## 5. Where this fits later
 
