@@ -49,9 +49,10 @@ See [docs/VOICE_SWITCH_BASICS.md](docs/VOICE_SWITCH_BASICS.md).
 
 If you are splitting runtime by device:
 
-- Pi 5 (sensor controller + MQTT): `bash apps/brain-runtime/deploy/start_pi5_controller.sh`
-- Jetson Orin Nano 8GB (voice STT/TTS): `bash apps/brain-runtime/deploy/start_orin_voice.sh`
-- RTX 4070 Ti 12GB (brain + vision): `bash apps/brain-runtime/deploy/start_4070_core.sh`
+- Pi 5 (MQTT broker + Zigbee2MQTT + switch controller): `bash apps/brain-runtime/deploy/start_pi5_controller.sh`
+- RTX 4070 Ti 12GB (voice STT/TTS on CUDA): `bash apps/brain-runtime/deploy/start_4070_voice.sh`
+- RTX 4070 Ti 12GB (brain + vision, optional alongside voice): `bash apps/brain-runtime/deploy/start_4070_core.sh`
+- Jetson Orin Nano 8GB (edge STT/TTS fallback): `bash apps/brain-runtime/deploy/start_orin_voice.sh`
 
 Deployment guide and env templates are in `apps/brain-runtime/deploy/`.
 
